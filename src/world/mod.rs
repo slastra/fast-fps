@@ -11,7 +11,7 @@
 mod arena;
 mod builder;
 pub mod dummy;
-mod lights;
+pub mod lights;
 
 pub use arena::{DUMMIES, SPAWNS};
 

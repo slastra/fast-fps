@@ -13,7 +13,7 @@ use std::f32::consts::TAU;
 
 use bevy::{
     camera::Exposure,
-    light::{CascadeShadowConfigBuilder, NotShadowCaster},
+    light::{CascadeShadowConfig, CascadeShadowConfigBuilder, NotShadowCaster},
     pbr::{DistanceFog, FogFalloff},
     prelude::*,
     render::{render_resource::Face, view::ColorGrading},
@@ -32,6 +32,8 @@ const DOME_RADIUS: f32 = 420.0;
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Sky>()
+        .init_resource::<Cascades>()
+        .add_systems(Update, apply_cascades)
         .add_systems(Startup, spawn_sky)
         .add_systems(Update, (sky_command, apply_look).chain())
         .add_systems(Update, drift_clouds)
@@ -54,6 +56,38 @@ pub enum SkyKind {
     Dusk,
     Dawn,
     Day,
+}
+
+/// How many shadow cascades the sun or moon uses. Each is another render of
+/// the shadow casters from the light's side. Set with `r_cascades`.
+#[derive(Resource)]
+pub struct Cascades(pub usize);
+
+impl Default for Cascades {
+    fn default() -> Self {
+        Self(4)
+    }
+}
+
+fn cascade_config(count: usize) -> CascadeShadowConfig {
+    CascadeShadowConfigBuilder {
+        num_cascades: count.max(1),
+        maximum_distance: 90.0,
+        first_cascade_far_bound: 14.0,
+        ..default()
+    }
+    .build()
+}
+
+/// Rebuild the key light's cascades when the count changes.
+fn apply_cascades(
+    cascades: Res<Cascades>,
+    mut commands: Commands,
+    key: Single<Entity, With<KeyLight>>,
+) {
+    if cascades.is_changed() {
+        commands.entity(*key).insert(cascade_config(cascades.0));
+    }
 }
 
 /// The current time of day.
@@ -460,12 +494,7 @@ fn spawn_sky(
             contact_shadows_enabled: true,
             ..default()
         },
-        CascadeShadowConfigBuilder {
-            maximum_distance: 90.0,
-            first_cascade_far_bound: 14.0,
-            ..default()
-        }
-        .build(),
+        cascade_config(4),
     ));
     commands.spawn((
         FillLight,

@@ -8,13 +8,31 @@ use rand::Rng;
 
 use crate::{
     lowpoly,
+    render::WorldCamera,
     sky::{Sky, SkyKind},
     world::builder::{Builder, IRON, ROCK, STONE_DARK, WOOD},
 };
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Update, (flicker, drift));
+    app.init_resource::<LampShadows>()
+        .add_systems(Update, (flicker, drift, lamp_shadow_budget));
 }
+
+/// How many lamps cast shadow maps: the ones nearest the camera. Each costs a
+/// six-sided shadow render of everything around it, every frame, and a
+/// distant lamp's shadows can't be seen anyway. Set with `r_lamp_shadows`.
+#[derive(Resource)]
+pub struct LampShadows(pub usize);
+
+impl Default for LampShadows {
+    fn default() -> Self {
+        Self(2)
+    }
+}
+
+/// A lamp post's light (not the campfire, which always casts shadows).
+#[derive(Component)]
+pub struct LampLight;
 
 /// A light that wobbles like fire.
 #[derive(Component)]
@@ -41,7 +59,7 @@ struct Ember {
     phase: f32,
 }
 
-pub fn lamp(b: &mut Builder, at: Vec3, lantern: Handle<StandardMaterial>, shadows: bool) {
+pub fn lamp(b: &mut Builder, at: Vec3, lantern: Handle<StandardMaterial>) {
     let post_h = 3.4;
     b.block(
         at + Vec3::Y * post_h / 2.0,
@@ -79,11 +97,16 @@ pub fn lamp(b: &mut Builder, at: Vec3, lantern: Handle<StandardMaterial>, shadow
             intensity: 14_000.0,
             range: 20.0,
             radius: 0.15,
-            shadow_maps_enabled: shadows,
-            contact_shadows_enabled: true,
+            // Decided each frame by `lamp_shadow_budget`.
+            shadow_maps_enabled: false,
+            // Screen-space contact shadows cost a ray march per pixel for every
+            // light that has them. A lamp's are too faint to see, so only the
+            // campfire and the sun or moon keep them.
+            contact_shadows_enabled: false,
             ..default()
         },
         Transform::from_translation(top + Vec3::Y * -0.25),
+        LampLight,
         Flicker {
             base: 14_000.0,
             seed: at.x * 0.37 + at.z * 0.71,
@@ -239,5 +262,30 @@ fn drift(
                 (t * 1.3 + p * 7.0).cos() * 0.25 * life,
             );
         transform.scale = Vec3::splat((1.0 - life).powi(2) * 1.4);
+    }
+}
+
+/// Give shadow maps to the lamps nearest the camera, and take them from the rest.
+fn lamp_shadow_budget(
+    budget: Res<LampShadows>,
+    camera: Query<&GlobalTransform, With<WorldCamera>>,
+    mut lamps: Query<(Entity, &GlobalTransform, &mut PointLight), With<LampLight>>,
+) {
+    let Ok(camera) = camera.single() else {
+        return;
+    };
+    let eye = camera.translation();
+    let mut by_distance: Vec<(Entity, f32)> = lamps
+        .iter()
+        .map(|(entity, at, _)| (entity, at.translation().distance_squared(eye)))
+        .collect();
+    by_distance.sort_by(|a, b| a.1.total_cmp(&b.1));
+    for (rank, (entity, _)) in by_distance.into_iter().enumerate() {
+        if let Ok((_, _, mut light)) = lamps.get_mut(entity) {
+            let want = rank < budget.0;
+            if light.shadow_maps_enabled != want {
+                light.shadow_maps_enabled = want;
+            }
+        }
     }
 }

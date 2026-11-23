@@ -10,8 +10,9 @@ use bevy::{
 use crate::{
     console::{ConsoleAppExt, ConsoleCommand, Print},
     render::{WorldCamera, set_anti_aliasing},
-    sky::Sky,
+    sky::{Cascades, Sky},
     weapon::HideViewModel,
+    world::lights::LampShadows,
 };
 
 pub(super) fn plugin(app: &mut App) {
@@ -28,6 +29,16 @@ pub(super) fn plugin(app: &mut App) {
     .console_command("r_contact", "<0|1>", "contact shadows")
     .console_command("r_shadows", "<0|1>", "shadow maps on every light")
     .console_command("r_viewmodel", "<0|1>", "draw your own gun")
+    .console_command(
+        "r_lamp_shadows",
+        "<count>",
+        "lamps nearest you that cast shadows (default 2)",
+    )
+    .console_command(
+        "r_cascades",
+        "<1-4>",
+        "shadow cascades for the sun or moon (default 4)",
+    )
     .console_command(
         "r_ambient",
         "<brightness>",
@@ -72,6 +83,18 @@ fn render_switches(
         if !name.starts_with("r_") {
             continue;
         }
+        if name == "r_lamp_shadows" || name == "r_cascades" {
+            let Some(n) = cmd.arg(0).and_then(|v| v.parse::<usize>().ok()) else {
+                print.write(Print::error(format!("usage: {name} <count>")));
+                continue;
+            };
+            if name == "r_lamp_shadows" {
+                commands.insert_resource(LampShadows(n));
+            } else {
+                commands.insert_resource(Cascades(n.clamp(1, 4)));
+            }
+            continue;
+        }
         if name == "r_ambient" {
             let Some(brightness) = cmd.arg(0).and_then(|v| v.parse::<f32>().ok()) else {
                 print.write(Print::error("usage: r_ambient <brightness>"));
@@ -106,6 +129,8 @@ fn render_switches(
             "r_contact" => toggle(&mut commands, camera, on, ContactShadows::default),
             "r_viewmodel" => hide_view_model.0 = !on,
             "r_shadows" => {
+                // Lamps get theirs from the budget, so turn that off too.
+                commands.insert_resource(LampShadows(if on { 2 } else { 0 }));
                 for mut light in &mut point_lights {
                     light.shadow_maps_enabled = on;
                 }

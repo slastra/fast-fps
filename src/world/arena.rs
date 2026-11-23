@@ -181,7 +181,7 @@ pub fn spawn_level(
     }
 
     // Lamps.
-    for (i, at) in [
+    for at in [
         Vec3::new(11.0, 0.0, 11.0),
         Vec3::new(-11.0, 0.0, 11.0),
         Vec3::new(11.0, 0.0, -11.0),
@@ -191,11 +191,8 @@ pub fn spawn_level(
         Vec3::new(-31.0, 0.0, 0.0),
         Vec3::new(31.0, 0.0, -15.0),
         Vec3::new(31.0, 0.0, 15.0),
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        lamp(&mut b, at, lantern.clone(), i % 3 == 0);
+    ] {
+        lamp(&mut b, at, lantern.clone());
     }
 
     campfire(&mut b, Vec3::new(2.8, 0.0, 0.0), flame);
