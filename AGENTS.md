@@ -105,6 +105,9 @@ Each of these cost real debugging time once.
 
 ## Building
 
+Run `scripts/install-deps.sh` first on Arch or CachyOS. It installs any missing system
+packages (`--check` only reports).
+
 - Linux packages (Arch/CachyOS names): `base-devel alsa-lib systemd-libs wayland libxkbcommon
   vulkan-icd-loader` plus a Vulkan driver for the GPU (`vulkan-intel`, `vulkan-radeon` or
   `nvidia-utils`). The harness also needs `sway`. `imagemagick` is optional.
@@ -112,6 +115,24 @@ Each of these cost real debugging time once.
   game rebuild in seconds because the engine is linked as a shared library in dev builds.
 - For faster linking, install `mold` and `clang` and copy the relevant lines from
   `.cargo/config_fast_builds.toml` into `.cargo/config.toml` (which is not committed).
+
+## On a slow or small machine
+
+On a laptop with a couple of cores and 8 GB of memory the first build can take an hour or
+more. That is the engine compiling, once. Until it finishes there is nothing to run.
+
+- **Never start a second build while one is running.** Check with `pgrep -a cargo`. A second
+  `cargo build`, `cargo run`, `cargo test`, `cargo clippy` or `scripts/check.sh` doesn't help;
+  the two fight over memory and both get slower. Wait for the first, or stop it.
+- **Don't treat a long, quiet build as a hang** and don't cancel and restart it. Restarting
+  throws nothing away, but it doesn't speed anything up either.
+- **After the first build, `cargo run`, `cargo test` and `scripts/harness.sh` rebuild only the
+  game**, which is far quicker.
+- **`cargo check` and `cargo clippy` make their own, lighter pass over the engine the first
+  time they run**, so the first `scripts/check.sh` is slow too. Run it when the machine is
+  otherwise idle. After that, `cargo check` is the fastest way to find compile errors.
+- **If the game is slow to play,** `exec cfg/low.cfg` in the console turns off the expensive
+  graphics. The harness can be given a longer timeout with `-t 300`.
 
 ## What the tests cannot tell you
 

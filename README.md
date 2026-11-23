@@ -37,10 +37,13 @@ coding agents.
 ```sh
 git clone https://github.com/slastra/fast-fps
 cd fast-fps
+scripts/install-deps.sh    # Arch and CachyOS: installs anything missing
 cargo run
 ```
 
-The first build compiles the engine and takes a while. After that it is quick.
+The first build compiles the engine. On a fast desktop that is a few minutes; on a small
+laptop it can be an hour or more, and it looks stuck when it isn't. After that, changes
+rebuild quickly. If the game runs slowly, type `exec cfg/low.cfg` in the console.
 
 ## Usage
 

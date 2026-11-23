@@ -30,6 +30,9 @@
 # plus result.txt for the whole run.
 #
 # Exit status: 0 all passed, 1 something failed, 2 couldn't start.
+#
+# Set HARNESS_BIN to test a binary that is already built instead of building:
+#   HARNESS_BIN=target/release/fast-fps scripts/harness.sh tests/harness/smoke.cfg
 set -u
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT" || exit 2
@@ -38,7 +41,7 @@ MODE=headless
 TIMEOUT=120
 SIZE=1280x720
 CONFIG_BASE=""
-usage() { sed -n '2,33p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
 while getopts "vwt:s:c:h" opt; do
     case $opt in
     v) MODE=nested ;;
@@ -73,18 +76,27 @@ if [ "$MODE" != headless ] && [ -z "${WAYLAND_DISPLAY:-}" ] && [ -z "${DISPLAY:-
     exit 2
 fi
 
-# The package name is the binary name, and names the log lines we read.
+# The package name is the binary name.
 NAME=$(sed -n '/^\[package\]/,/^\[/s/^name *= *"\(.*\)"/\1/p' Cargo.toml | head -1)
 [ -n "$NAME" ] || { echo "harness: can't read the package name from Cargo.toml" >&2; exit 2; }
-LOG_TARGET="${NAME//-/_}::console"
 
-echo "building $NAME..."
-if ! cargo build -q; then
-    echo "harness: build failed" >&2
-    exit 2
-fi
 TARGET=${CARGO_TARGET_DIR:-$ROOT/target}
-BIN=$TARGET/debug/$NAME
+ASSETS=$ROOT
+if [ -n "${HARNESS_BIN:-}" ]; then
+    # Test a binary that is already built, such as a release build.
+    BIN=$(realpath "$HARNESS_BIN")
+    [ -x "$BIN" ] || { echo "harness: HARNESS_BIN is not a program: $BIN" >&2; exit 2; }
+    echo "using $BIN"
+    # A packaged copy carries its own assets; use those, as a player would.
+    [ -d "$(dirname "$BIN")/assets" ] && ASSETS=$(dirname "$BIN")
+else
+    echo "building $NAME..."
+    if ! cargo build -q; then
+        echo "harness: build failed" >&2
+        exit 2
+    fi
+    BIN=$TARGET/debug/$NAME
+fi
 # Dev builds link Bevy dynamically; `cargo run` sets this up, so we do too.
 LIBS="$TARGET/debug/deps:$TARGET/debug:$(rustc --print target-libdir)"
 
@@ -152,8 +164,9 @@ for script in "$@"; do
     game_env=(
         "LD_LIBRARY_PATH=$LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         "HARNESS=1"
-        "BEVY_ASSET_ROOT=$ROOT"
+        "BEVY_ASSET_ROOT=$ASSETS"
         "SCREENSHOT_DIR=$out"
+        "CONSOLE_LOG=$out/console.txt"
         "XDG_CONFIG_HOME=${CONFIG_BASE:-$out/config}"
         "XDG_STATE_HOME=$out/state"
     )
@@ -174,8 +187,7 @@ for script in "$@"; do
     # so a host is listening by the time its clients try to connect.
     if [ $i -lt $# ]; then
         for _ in $(seq 300); do
-            # (The live log still has color codes, so match the message only.)
-            grep -q -F "] exec " "$out/game.log" 2>/dev/null && break
+            grep -q -F "] exec " "$out/console.txt" 2>/dev/null && break
             kill -0 "${GAME_PIDS[-1]}" 2>/dev/null || break
             sleep 0.2
         done
@@ -214,7 +226,8 @@ for idx in "${!NAMES[@]}"; do
     out=$RUN_DIR/$name
     sed 's/\x1b\[[0-9;]*m//g' "$out/game.log" >"$out/game.plain"
     mv "$out/game.plain" "$out/game.log"
-    grep -F "$LOG_TARGET: " "$out/game.log" | sed "s/^.*$LOG_TARGET: //" >"$out/console.txt"
+    # The game writes console.txt itself (see CONSOLE_LOG above).
+    touch "$out/console.txt"
 
     problems=()
     notes=()

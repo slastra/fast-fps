@@ -225,6 +225,12 @@ quit                                  wait_until mode == offline 5
 
 Use a port other than 27015 so the test can run while a real game is hosting.
 
+To test a binary that is already built (a release build, say) instead of building one:
+
+```sh
+HARNESS_BIN=target/release/fast-fps scripts/harness.sh tests/harness/smoke.cfg
+```
+
 ## The scenarios that ship
 
 `scripts/check.sh` runs every line of `tests/harness/suite.txt`.
@@ -260,7 +266,8 @@ Use a port other than 27015 so the test can run while a real game is hosting.
   runtime folder, and runs the game binary in it with `+name <script> +exec <script>`.
 - It sets `HARNESS=1`, which makes the game compile shaders before drawing instead of in the
   background, so a screenshot is never of a half-drawn scene. `SCREENSHOT_DIR` tells
-  `screenshot` where to save. Scripts also wait for the HUD font to load.
+  `screenshot` where to save, and `CONSOLE_LOG` names the file the console transcript is
+  written to. Scripts also wait for the HUD font to load.
 - The script engine is `src/console/script.rs`. `assert`, `wait_until` and `state` are in
   `src/debug/probe.rs`. `screenshot`, `tp`, `look` are in `src/debug/mod.rs`.
 - Anything that must finish before the next script line takes a `ScriptHold`

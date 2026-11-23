@@ -7,7 +7,7 @@
 
 use bevy::{
     camera::{RenderTarget, ScalingMode, visibility::RenderLayers},
-    core_pipeline::tonemapping::Tonemapping,
+    core_pipeline::tonemapping::{DebandDither, Tonemapping},
     light::NotShadowCaster,
     prelude::*,
     render::render_resource::TextureFormat,
@@ -122,6 +122,7 @@ fn open_studios(
             layer,
             Msaa::Sample4,
             Tonemapping::None,
+            DebandDither::Disabled,
         ));
         image
     });

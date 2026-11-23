@@ -258,10 +258,24 @@ fn builtin_commands(
     }
 }
 
-fn collect_prints(mut prints: MessageReader<Print>, mut console: ResMut<Console>) {
+/// Everything printed goes to the console, the log, and, if `CONSOLE_LOG`
+/// names a file, to that file. The test harness reads the file: it works the
+/// same in release builds, where info-level logging is compiled out.
+fn collect_prints(
+    mut prints: MessageReader<Print>,
+    mut console: ResMut<Console>,
+    mut transcript: Local<Option<Option<std::fs::File>>>,
+) {
+    use std::io::Write;
+    let file = transcript.get_or_insert_with(|| {
+        std::env::var_os("CONSOLE_LOG").and_then(|path| std::fs::File::create(path).ok())
+    });
     for Print(text) in prints.read() {
         info!("{text}");
         for line in text.lines() {
+            if let Some(file) = file {
+                let _ = writeln!(file, "{line}");
+            }
             console.lines.push_back(line.to_string());
         }
     }
