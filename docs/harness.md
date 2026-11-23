@@ -1,0 +1,263 @@
+# The test harness
+
+The game is driven by console commands, so a test is a text file of console commands. The
+harness starts the game on an invisible display, feeds it that file, and reports PASS or FAIL.
+Nothing appears on your desktop and no keyboard or mouse input is faked: the script runs
+*inside* the game.
+
+```sh
+scripts/harness.sh tests/harness/smoke.cfg
+```
+
+```
+building fast-fps...
+started smoke
+PASS  smoke  (9 checks, 1 screenshots)
+results: /…/target/harness/20261123-022244
+RESULT: PASS
+```
+
+## What makes a run pass
+
+An instance passes only if all of these hold:
+
+- its script reached `quit`
+- the console printed no line starting with `error:` (failed `assert`, timed-out `wait_until`,
+  unknown command, wrong arguments)
+- nothing panicked, and the log has no `ERROR` line
+- every `screenshot NAME` in the script produced a file
+
+The exit status is `0` if every instance passed, `1` if any failed, `2` if the run couldn't
+start (build failed, missing script, script without `quit`, missing `sway`).
+
+On failure the harness prints each reason and the last console lines, so you can usually see
+what went wrong without opening a file:
+
+```
+FAIL  bad  (bad.cfg)
+      error: assert failed: ammo == 12 (ammo is 30)
+      error: unknown command 'frobnicate', try 'help'
+      --- last console lines (…/bad/console.txt) ---
+      ] assert ammo == 12
+      error: assert failed: ammo == 12 (ammo is 30)
+```
+
+**A PASS means the checks you wrote passed.** A script with no `assert` only proves the game
+didn't crash. For anything visual, open the screenshots and look.
+
+## Results
+
+Each run gets a folder, and `target/harness/latest` always points at the newest one.
+
+```
+target/harness/<run>/
+  result.txt            the report that was printed
+  <script>/console.txt  everything the console printed, in order. Read this first.
+  <script>/game.log     the full engine log
+  <script>/*.png        screenshots
+```
+
+`console.txt` reads like a transcript: each command (`] like this`) followed by what it printed.
+
+## Options
+
+| | |
+|---|---|
+| `-t SECS` | Give up after this long. Default 120. Raise it on a slow machine. |
+| `-s WxH` | Display size, which is also the screenshot size. Default `1280x720`. |
+| `-v` | Watch: show each instance in a nested sway window on your desktop. |
+| `-w` | Use ordinary windows on your desktop. No sway needed, but screenshot size is whatever the window manager gives. |
+| `-c DIR` | Use this settings folder instead of a fresh one, to test that settings survive a restart. |
+
+Several scripts in one command start several game instances, in order, each once the one
+before it has loaded. That is how multiplayer is tested:
+
+```sh
+scripts/harness.sh tests/harness/lan_host.cfg tests/harness/lan_client.cfg
+```
+
+## Writing a script
+
+A script is one console command per line. Blank lines and lines starting with `//` or `#` are
+ignored. It **must end with `quit`**.
+
+```
+// tests/harness/smoke.cfg
+wait_until grounded == 1 5
+assert mode == offline
+assert ammo == 30
+screenshot boot
+bot
+assert bots == 1
+fire 3
+wait_until ammo == 27 3
+quit
+```
+
+How scripts run:
+
+- **Nothing runs until the game has loaded** and drawn a few frames. Don't add a startup wait.
+- **One line runs per frame**, so each line sees the result of the one before it. `bot` then
+  `assert bots == 1` works. (`;` puts several commands on one line and in one frame.)
+- **`wait SECONDS` counts game time**, not wall-clock time, so it stays in step with physics
+  and animation on a slow machine.
+- **`screenshot` pauses the script** until the file is saved.
+- **Prefer `wait_until` to `wait`** whenever you are waiting *for something*. A fixed wait is
+  a guess that breaks on a slower machine; `wait_until` is exact and fails loudly.
+
+### Commands for tests
+
+| Command | What it does |
+|---|---|
+| `assert KEY OP VALUE` | Check a value right now. Prints `assert ok: …` or `error: assert failed: …`. |
+| `wait_until KEY OP VALUE [SECS]` | Pause until the check is true. Fails after SECS (default 10). |
+| `state [KEY …]` | Print values (all of them with no keys). Handy while writing a script. |
+| `wait SECS` | Pause for that much game time. |
+| `screenshot NAME` | Save `NAME.png` into the results folder. |
+| `tp X Y Z` | Teleport yourself. Y is your body's center; standing on flat ground is 0.9. |
+| `look YAW PITCH` | Set view angles in degrees. Yaw 0 looks toward -Z, 90 toward -X. Pitch up is positive. |
+| `spin DEG_PER_SEC` | Turn steadily, for motion artifacts. `spin 0` stops. |
+| `fire [N]` | Pull the trigger N times (as fast as the weapon allows). |
+| `weapon NAME`, `zoom LEVEL` | Switch weapon; set the sniper scope level (0 is unscoped). |
+| `bot [X Y Z YAW]`, `bot_do ID ORDER [ARG]` | Spawn and direct practice bots. See below. |
+| `r_ambient N`, `r_viewmodel 0` | Flat fill light (try 12) and hiding your own gun, for clear screenshots. |
+| `host PORT`, `connect IP:PORT`, `disconnect` | Multiplayer. |
+
+`OP` is one of `== != < <= > >=`. Values that look like numbers compare as numbers (`==`
+allows a tiny rounding error); anything else compares as text, ignoring case, with `==` and
+`!=` only. `docs/console.md` lists every command.
+
+### What you can check
+
+`state` prints all of these. They are filled in by `collect` in `src/debug/probe.rs`.
+
+| Key | Meaning |
+|---|---|
+| `mode` | `offline`, `hosting`, `connecting` or `client` |
+| `players` | everyone in the game, bots included |
+| `bots` | practice bots |
+| `health`, `kills`, `deaths` | yours |
+| `weapon` | `ak`, `mp5`, `glock`, `shotgun`, `sniper` |
+| `ammo` | rounds left in the current weapon |
+| `reloading`, `scoped` | `1` or `0` |
+| `spread` | your accuracy cone in degrees; bigger is less accurate |
+| `x`, `y`, `z`, `speed` | your body's position and horizontal speed |
+| `grounded`, `crouching` | `1` or `0` |
+| `ragdolls` | corpses in the world, including ones fading out |
+| `decals` | bullet holes in the world |
+| `dummies_down` | practice dummies currently knocked over |
+| `sens`, `fov` | view settings |
+| `name`, `time`, `fps` | your name, game seconds since start, frame rate |
+
+To check something of your own, publish it from any system and it becomes a key:
+
+```rust
+fn publish(mut probe: ResMut<Probe>, coins: Res<Coins>) {
+    probe.set("coins", coins.0);
+}
+```
+
+### Bots
+
+Bots are players with no person behind them, so a script can set up a scene and test things
+that need someone else in the world. They work when hosting or offline.
+
+```
+bot -2 0.9 11 180        // at x=-2, standing height, z=11, facing +Z (yaw 180)
+bot                      // or: 5 m in front of you, facing you
+bot_do all pin           // animate in place instead of walking a circle
+bot_do 1 run
+bot_do 2 crouch
+bot_do 3 weapon sniper
+bot_do all fire 6
+```
+
+Orders: `idle walk run strafe back crouch stand jump reload fire weapon look pin free remove`.
+Bots are numbered from 1 in the order they were spawned. Their shots are for show and do no
+damage, but you can shoot them: one scoped sniper shot kills, or a few AK body shots.
+
+To kill a bot from a script, face it, wait for your weapon to settle, and check the result:
+
+```
+tp 0 1.2 17
+look 0 -6
+weapon sniper
+wait 1.0                 // draw time
+zoom 1
+wait 0.4                 // accuracy settles
+fire 1
+wait_until ragdolls == 1 3
+assert kills == 1
+```
+
+### Looking at screenshots
+
+Screenshots are the only way to verify anything visual. Two habits make them useful:
+
+- Light the scene and clear the view at the top of the script: `r_ambient 12` and
+  `r_viewmodel 0`. The map is a night scene and your own gun covers a third of the frame.
+- Take two shots a few frames apart (`wait 0.13`) for anything that moves, so a frozen
+  animation or a one-frame glitch shows up.
+
+If you have ImageMagick, crop and enlarge the part you care about before judging it:
+
+```sh
+magick target/harness/latest/anim/b_side_1.png -crop 800x400+300+200 +repage -resize 200% /tmp/crop.png
+```
+
+### Multiplayer scripts
+
+Use `wait_until` to keep two instances in step instead of guessing at timing. The host waits
+for the client to arrive; the client waits until it is really connected:
+
+```
+// host                               // client
+host 27555                            connect 127.0.0.1:27555
+wait_until players == 2 60            wait_until mode == client 20
+…                                     …
+wait_until players == 1 30            disconnect
+quit                                  wait_until mode == offline 5
+                                      quit
+```
+
+Use a port other than 27015 so the test can run while a real game is hosting.
+
+## The scenarios that ship
+
+`scripts/check.sh` runs every line of `tests/harness/suite.txt`.
+
+| Script | What it proves |
+|---|---|
+| `smoke.cfg` | The game starts, draws, answers commands, spawns a bot, fires. |
+| `spray.cfg` | Each weapon fires and empties; accuracy changes scoped, unscoped and airborne. Screenshots show the spray patterns as bullet holes. |
+| `ragdoll.cfg` | Three kills each leave a ragdoll, and they all fade away. |
+| `anim.cfg` | Screenshots of every animation state, pose and weapon hold. For looking at. |
+| `artifacts.cfg` | Screenshots while turning, in two anti-aliasing modes. For looking at. |
+| `lan_host.cfg` + `lan_client.cfg` | A client joins, sees the host's bots, kills one, and both sides see the corpse. |
+| `settings_save.cfg` then `settings_load.cfg` | Settings survive a restart (they share a `-c` folder). |
+
+## When it doesn't work
+
+- **"sway is needed"**: install sway, or pass `-w`.
+- **Timed out**: read `console.txt` to see the last line that ran. Usually a `wait_until` that
+  can never be true, or a machine slower than the timeout allows (`-t 300`).
+- **A screenshot is black or empty**: you are inside or facing a wall (`state x y z`, then
+  move), or it is simply night (`r_ambient 12`).
+- **"could not host: Address already in use"**: another instance has that port. Pick another.
+- **It passes here and fails on another machine**: look for a fixed `wait` that should be a
+  `wait_until`.
+- **A note about "exit status … after 'quit'"**: the game crashed while shutting down, after
+  the script had finished. It is reported but doesn't fail the run.
+
+## How it works
+
+- `scripts/harness.sh` builds the game, starts one headless `sway` per instance with a private
+  runtime folder, and runs the game binary in it with `+name <script> +exec <script>`.
+- It sets `HARNESS=1`, which makes the game compile shaders before drawing instead of in the
+  background, so a screenshot is never of a half-drawn scene. `SCREENSHOT_DIR` tells
+  `screenshot` where to save.
+- The script engine is `src/console/script.rs`. `assert`, `wait_until` and `state` are in
+  `src/debug/probe.rs`. `screenshot`, `tp`, `look` are in `src/debug/mod.rs`.
+- Anything that must finish before the next script line takes a `ScriptHold`
+  (`hold.0 += 1`) and releases it when done. Screenshots and asset loading do this. If you add
+  something slow that scripts depend on, do the same.
