@@ -6,7 +6,7 @@ license = "MIT"
 
 [dependencies]
 bevy = { version = "0.20.1", features = ["serialize", "ktx2", "zstd_rust", "wav"] }
-avian3d = { version = "0.8", features = ["serialize"] }
+avian3d = { version = "0.8", features = ["serialize", "bevy_diagnostic"] }
 bevy_ahoy = { version = "0.3", default-features = false }
 bevy_enhanced_input = "0.27"
 bevy_replicon = "0.45"

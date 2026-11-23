@@ -65,9 +65,10 @@ out=$TARGET/bench/$(date +%Y%m%d-%H%M%S)-$LABEL.txt
     [ -n "$SETUP" ] && echo "setup: $SETUP"
     [ $WINDOW = 0 ] && echo "frame rates from an invisible display are approximate; GPU times are not"
     echo
-    printf '%-16s %9s %7s %9s %9s %8s\n' view "avg ms" fps "p99 ms" "worst" "gpu ms"
-    sed -n 's/^perf \([a-z_]*\): \([0-9.]*\) ms avg (\([0-9]*\) fps), \([0-9.]*\) ms p99, \([0-9.]*\) ms worst, \(gpu \([0-9.]*\) ms\|gpu n\/a\).*/\1 \2 \3 \4 \5 \7/p' "$console" |
-        awk '{ printf "%-16s %9s %7s %9s %9s %8s\n", $1, $2, $3, $4, $5, ($6 == "" ? "n/a" : $6) }'
+    printf '%-16s %8s %6s %8s %8s %8s %8s %8s\n' view "avg ms" fps "p99 ms" worst "gpu ms" "cpu ms" "cpu p99"
+    sed -n 's/^perf \([a-z_]*\): \([0-9.]*\) ms avg (\([0-9]*\) fps), \([0-9.]*\) ms p99, \([0-9.]*\) ms worst, \(gpu \([0-9.]*\) ms\|gpu n\/a\), cpu \([0-9.]*\) ms (\([0-9.]*\) p99).*/\1 \2 \3 \4 \5 \7 \8 \9/p' "$console" |
+        awk 'NF == 8 { printf "%-16s %8s %6s %8s %8s %8s %8s %8s\n", $1, $2, $3, $4, $5, $6, $7, $8 }
+             NF == 7 { printf "%-16s %8s %6s %8s %8s %8s %8s %8s\n", $1, $2, $3, $4, $5, "n/a", $6, $7 }'
     echo
     echo "Slowest GPU passes per view (ms):"
     awk '/^perf [a-z_]+:/ { view = $2; sub(":", "", view) } /^  gpu: / { sub("^  gpu: ", ""); print "  " view ": " $0 }' "$console"

@@ -5,9 +5,13 @@
 //! which prints one line:
 //!
 //! ```text
-//! perf arena: 6.9 ms avg (145 fps), 9.8 ms p99, 41 ms worst, gpu 5.6 ms, 412 frames
+//! perf arena: 6.9 ms avg (145 fps), 9.8 ms p99, 41 ms worst, gpu 5.6 ms, cpu 1.2 ms (2.0 p99), 412 frames
 //!   gpu: main_opaque_pass_3d 2.1, shadows 1.6, ssao 0.8, ...
 //! ```
+//!
+//! `cpu` is the game's own update (input, gameplay, animation, UI), measured
+//! from the start of the frame's `First` schedule to its `Last` schedule. It
+//! doesn't include rendering work, which runs alongside on other threads.
 //!
 //! GPU time per render pass comes from Bevy's `RenderDiagnosticsPlugin`,
 //! which uses GPU timestamp queries. It is only added when the game is started
@@ -30,11 +34,21 @@ use crate::{
 const TOP_PASSES: usize = 8;
 
 pub(super) fn plugin(app: &mut App) {
-    let timed = std::env::var_os("HARNESS").is_some() || std::env::var_os("GPU_TIMINGS").is_some();
+    // On under the harness and with GPU_TIMINGS set; GPU_TIMINGS=0 turns it off.
+    let timed = match std::env::var("GPU_TIMINGS") {
+        Ok(v) => v != "0",
+        Err(_) => std::env::var_os("HARNESS").is_some(),
+    };
     if timed {
-        app.add_plugins(RenderDiagnosticsPlugin);
+        app.add_plugins((
+            RenderDiagnosticsPlugin,
+            avian3d::prelude::PhysicsDiagnosticsPlugin,
+        ));
     }
     app.init_resource::<FrameWindow>()
+        .init_resource::<UpdateStart>()
+        .init_resource::<Seen>()
+        .add_systems(First, start_update)
         .add_systems(Last, record_frame)
         .add_systems(Update, perf_commands);
 
@@ -51,13 +65,30 @@ pub(super) fn plugin(app: &mut App) {
         );
 }
 
+/// When this frame's update began.
+#[derive(Resource, Default)]
+struct UpdateStart(Option<std::time::Instant>);
+
+fn start_update(mut start: ResMut<UpdateStart>) {
+    start.0 = Some(std::time::Instant::now());
+}
+
 /// Frame times (ms) since the last `perf_reset`.
 #[derive(Resource, Default)]
 struct FrameWindow {
     frames: Vec<f32>,
+    /// CPU time of the game's own update each frame (First to Last), which
+    /// doesn't depend on the display or the GPU.
+    updates: Vec<f32>,
     /// GPU time per pass, summed over the window: (pass, total ms, samples).
     gpu: Vec<(String, f64, u32)>,
 }
+
+/// When each diagnostic was last counted. A pass that stops running (an
+/// effect switched off) keeps its last value in the store forever, so only
+/// measurements newer than the last one counted are new data.
+#[derive(Resource, Default)]
+struct Seen(std::collections::HashMap<String, std::time::Instant>);
 
 impl FrameWindow {
     fn summary(&self) -> Option<Summary> {
@@ -69,6 +100,13 @@ impl FrameWindow {
         let avg = sorted.iter().sum::<f32>() / sorted.len() as f32;
         let p99 = sorted[((sorted.len() as f32 * 0.99) as usize).min(sorted.len() - 1)];
         let worst = *sorted.last().unwrap();
+        let mut updates = self.updates.clone();
+        updates.sort_by(f32::total_cmp);
+        let update = (!updates.is_empty()).then(|| {
+            let avg = updates.iter().sum::<f32>() / updates.len() as f32;
+            let p99 = updates[((updates.len() as f32 * 0.99) as usize).min(updates.len() - 1)];
+            (avg, p99)
+        });
         let mut passes: Vec<(String, f64)> = self
             .gpu
             .iter()
@@ -78,7 +116,7 @@ impl FrameWindow {
         // Top-level passes only, so nested spans aren't counted twice.
         let gpu = passes
             .iter()
-            .filter(|(name, _)| !name.contains('/'))
+            .filter(|(name, _)| !name.contains('/') && !name.starts_with("physics:"))
             .map(|(_, ms)| ms)
             .sum::<f64>();
         Some(Summary {
@@ -87,6 +125,7 @@ impl FrameWindow {
             worst,
             frames: sorted.len(),
             gpu: (!passes.is_empty()).then_some(gpu),
+            update,
             passes,
         })
     }
@@ -98,13 +137,17 @@ struct Summary {
     worst: f32,
     frames: usize,
     gpu: Option<f64>,
+    /// Average and p99 of the update's CPU time.
+    update: Option<(f32, f32)>,
     passes: Vec<(String, f64)>,
 }
 
 /// Record this frame's time and GPU pass timings.
 fn record_frame(
     time: Res<Time<Real>>,
+    start: Res<UpdateStart>,
     diagnostics: Option<Res<DiagnosticsStore>>,
+    mut seen: ResMut<Seen>,
     mut window: ResMut<FrameWindow>,
     mut probe: ResMut<Probe>,
 ) {
@@ -113,18 +156,30 @@ fn record_frame(
         return;
     }
     window.frames.push(ms);
+    if let Some(start) = start.0 {
+        window.updates.push(start.elapsed().as_secs_f32() * 1000.0);
+    }
     if let Some(diagnostics) = diagnostics {
         for diagnostic in diagnostics.iter() {
             let path = diagnostic.path().as_str();
+            let physics = path.strip_prefix("avian/").map(|p| format!("physics:{p}"));
             let Some(pass) = path
                 .strip_prefix("render/")
                 .and_then(|p| p.strip_suffix("/elapsed_gpu"))
+                .map(str::to_string)
+                .or(physics)
             else {
                 continue;
             };
-            let Some(value) = diagnostic.value() else {
+            let Some(measurement) = diagnostic.measurement() else {
                 continue;
             };
+            if seen.0.get(&pass) == Some(&measurement.time) {
+                continue;
+            }
+            seen.0.insert(pass.clone(), measurement.time);
+            let value = measurement.value;
+            let pass = pass.as_str();
             match window.gpu.iter_mut().find(|(name, ..)| name == pass) {
                 Some(entry) => {
                     entry.1 += value;
@@ -139,6 +194,9 @@ fn record_frame(
         probe.set("frame_ms_p99", format!("{:.2}", summary.p99));
         if let Some(gpu) = summary.gpu {
             probe.set("gpu_ms", format!("{gpu:.2}"));
+        }
+        if let Some((avg, _)) = summary.update {
+            probe.set("cpu_ms", format!("{avg:.2}"));
         }
     }
 }
@@ -161,18 +219,29 @@ fn perf_commands(
                 let gpu = s
                     .gpu
                     .map_or("gpu n/a".to_string(), |g| format!("gpu {g:.2} ms"));
+                let (cpu, cpu_p99) = s.update.unwrap_or((0.0, 0.0));
                 print.write(Print(format!(
-                    "perf {label}: {:.2} ms avg ({:.0} fps), {:.2} ms p99, {:.1} ms worst, {gpu}, {} frames",
+                    "perf {label}: {:.2} ms avg ({:.0} fps), {:.2} ms p99, {:.1} ms worst, {gpu}, cpu {cpu:.2} ms ({cpu_p99:.2} p99), {} frames",
                     s.avg,
                     1000.0 / s.avg,
                     s.p99,
                     s.worst,
                     s.frames
                 )));
+                let physics: Vec<String> = s
+                    .passes
+                    .iter()
+                    .filter(|(name, _)| name.starts_with("physics:"))
+                    .map(|(name, v)| format!("{} {v:.2}", &name["physics:".len()..]))
+                    .collect();
+                if !physics.is_empty() {
+                    print.write(Print(format!("  physics: {}", physics.join(", "))));
+                }
                 if !s.passes.is_empty() {
                     let top: Vec<String> = s
                         .passes
                         .iter()
+                        .filter(|(name, _)| !name.starts_with("physics:"))
                         .take(TOP_PASSES)
                         .map(|(name, ms)| format!("{name} {ms:.2}"))
                         .collect();
