@@ -1,5 +1,5 @@
-//! A bare-bones HUD: crosshair with hit marker, health, ammo, kill feed,
-//! a status line and a Tab scoreboard.
+//! A bare-bones HUD: an accuracy crosshair with hit marker, sniper scope,
+//! health, ammo, weapon slots, kill feed, a status line and a Tab scoreboard.
 
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
@@ -12,7 +12,8 @@ use crate::{
     game::MAX_HEALTH,
     net::{Feed, Health, LocalId, Player, PlayerName, Score},
     player::GameInput,
-    weapon::{Gun, HitMarker},
+    render::WorldCamera,
+    weapon::{Arsenal, HitMarker, WeaponKind},
 };
 
 const TEXT: Color = Color::srgb(0.93, 0.9, 0.86);
@@ -25,12 +26,30 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(PreUpdate, collect_feed.after(ClientSystems::Receive))
         .add_systems(
             Update,
-            (crosshair, vitals, feed, status, scoreboard, damage_flash),
+            (
+                crosshair,
+                scope,
+                vitals,
+                slots,
+                feed,
+                status,
+                scoreboard,
+                damage_flash,
+            ),
         );
 }
 
 #[derive(Component)]
 struct CrossBar(Vec2);
+
+#[derive(Component)]
+struct CrosshairRoot;
+
+#[derive(Component)]
+struct ScopeOverlay;
+
+#[derive(Component)]
+struct SlotText(WeaponKind);
 
 #[derive(Component)]
 struct HealthText;
@@ -73,6 +92,7 @@ fn spawn_hud(mut commands: Commands) {
                 ..default()
             },
             Pickable::IGNORE,
+            CrosshairRoot,
         ))
         .with_children(|root| {
             for dir in [Vec2::X, Vec2::NEG_X, Vec2::Y, Vec2::NEG_Y] {
@@ -83,6 +103,86 @@ fn spawn_hud(mut commands: Commands) {
                         ..default()
                     },
                     BackgroundColor(TEXT.with_alpha(0.85)),
+                ));
+            }
+        });
+
+    // Sniper scope: a round window cut out of black by a huge outline,
+    // with thin crosshair lines across it.
+    commands
+        .spawn((
+            ScopeOverlay,
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                overflow: Overflow::clip(),
+                ..default()
+            },
+            Visibility::Hidden,
+            Pickable::IGNORE,
+        ))
+        .with_children(|root| {
+            root.spawn((
+                Node {
+                    height: percent(94),
+                    aspect_ratio: Some(1.0),
+                    border_radius: BorderRadius::MAX,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
+                Outline {
+                    width: px(4000),
+                    offset: px(0),
+                    color: Color::BLACK,
+                },
+            ))
+            .with_children(|lens| {
+                let line = Color::srgba(0.0, 0.0, 0.0, 0.9);
+                lens.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: percent(100),
+                        height: px(1),
+                        ..default()
+                    },
+                    BackgroundColor(line),
+                ));
+                lens.spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        width: px(1),
+                        height: percent(100),
+                        ..default()
+                    },
+                    BackgroundColor(line),
+                ));
+            });
+        });
+
+    // Weapon slots, bottom center.
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: px(26),
+                width: percent(100),
+                justify_content: JustifyContent::Center,
+                column_gap: px(18),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .with_children(|row| {
+            for (i, kind) in WeaponKind::ALL.into_iter().enumerate() {
+                row.spawn((
+                    SlotText(kind),
+                    Text::new(format!("{} {}", i + 1, kind.def().name)),
+                    font(14.0),
+                    TextColor(TEXT.with_alpha(0.35)),
                 ));
             }
         });
@@ -166,19 +266,37 @@ fn spawn_hud(mut commands: Commands) {
     ));
 }
 
+/// The gap is the inaccuracy cone projected onto the screen: a bullet will
+/// land somewhere between the bars (plus the spray pattern while spraying).
 fn crosshair(
     time: Res<Time>,
     mut marker: ResMut<HitMarker>,
-    gun: Res<Gun>,
+    arsenal: Res<Arsenal>,
+    window: Single<&Window>,
+    camera: Single<&Projection, With<WorldCamera>>,
+    mut root: Single<&mut Visibility, With<CrosshairRoot>>,
     mut bars: Query<(&CrossBar, &mut Node, &mut BackgroundColor)>,
 ) {
     marker.time = (marker.time - time.delta_secs()).max(0.0);
+    root.set_if_neq(if arsenal.scoped() {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    });
+    let fov = match *camera {
+        Projection::Perspective(p) => p.fov,
+        _ => 1.4,
+    };
+    let half_height = window.height() / 2.0;
+    let cone = arsenal.inaccuracy.to_radians().tan() / (fov / 2.0).tan() * half_height;
+    let gap = cone.max(3.0);
+
     let hit = marker.time > 0.0;
-    let gap = 6.0 + if hit { 5.0 } else { 0.0 } + if gun.reloading > 0.0 { 8.0 } else { 0.0 };
     let color = match (hit, marker.kill) {
         (true, true) => Color::srgb(1.0, 0.25, 0.15),
         (true, false) => Color::WHITE,
-        _ => TEXT.with_alpha(0.85),
+        _ if arsenal.reloading > 0.0 || arsenal.draw > 0.0 => TEXT.with_alpha(0.35),
+        _ => TEXT.with_alpha(0.9),
     };
     for (bar, mut node, mut bg) in &mut bars {
         let (len, thick) = (8.0, 2.0);
@@ -198,6 +316,24 @@ fn crosshair(
     }
 }
 
+fn scope(arsenal: Res<Arsenal>, mut overlay: Single<&mut Visibility, With<ScopeOverlay>>) {
+    overlay.set_if_neq(if arsenal.scoped() {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    });
+}
+
+fn slots(arsenal: Res<Arsenal>, mut texts: Query<(&SlotText, &mut TextColor)>) {
+    for (slot, mut color) in &mut texts {
+        color.0 = if slot.0 == arsenal.current {
+            Color::srgb(1.0, 0.62, 0.28)
+        } else {
+            TEXT.with_alpha(0.35)
+        };
+    }
+}
+
 fn local_player<'a>(
     players: &'a Query<(&Player, &Health, &PlayerName, &Score)>,
     local: &LocalId,
@@ -206,7 +342,7 @@ fn local_player<'a>(
 }
 
 fn vitals(
-    gun: Res<Gun>,
+    arsenal: Res<Arsenal>,
     local: Res<LocalId>,
     players: Query<(&Player, &Health, &PlayerName, &Score)>,
     mut health: Single<(&mut Text, &mut TextColor), (With<HealthText>, Without<AmmoText>)>,
@@ -221,10 +357,16 @@ fn vitals(
     } else {
         TEXT
     };
-    ammo.0 = if gun.reloading > 0.0 {
-        "reloading".into()
+    let def = arsenal.def();
+    ammo.0 = if arsenal.reloading > 0.0 {
+        format!("{}  reloading", def.name)
     } else {
-        format!("{} / {}", gun.ammo, Gun::MAG)
+        format!(
+            "{}  {} / {}",
+            def.name,
+            arsenal.ammo[arsenal.current.index()],
+            def.mag
+        )
     };
 }
 

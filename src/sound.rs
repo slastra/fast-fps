@@ -13,7 +13,9 @@ pub(super) fn plugin(app: &mut App) {
 
 #[derive(Resource)]
 pub struct Sounds {
-    pub shot: Handle<AudioSource>,
+    /// One per weapon, indexed by `WeaponKind::index`.
+    pub shots: [Handle<AudioSource>; 5],
+    pub zoom: Handle<AudioSource>,
     pub hit: Handle<AudioSource>,
     pub kill: Handle<AudioSource>,
     pub click: Handle<AudioSource>,
@@ -34,7 +36,65 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
         })
     };
     commands.insert_resource(Sounds {
-        shot: add(shot()),
+        shots: [
+            // AK: heavy crack and a deep thump.
+            add(shot(Gun {
+                crack: 0.7,
+                body: 1.6,
+                thump_hz: 140.0,
+                thump: 0.8,
+                decay: 11.0,
+                secs: 0.34,
+                seed: 1,
+            })),
+            // MP5: lighter and quicker.
+            add(shot(Gun {
+                crack: 0.55,
+                body: 1.0,
+                thump_hz: 190.0,
+                thump: 0.45,
+                decay: 18.0,
+                secs: 0.22,
+                seed: 2,
+            })),
+            // Glock: snappy.
+            add(shot(Gun {
+                crack: 0.8,
+                body: 0.8,
+                thump_hz: 230.0,
+                thump: 0.4,
+                decay: 22.0,
+                secs: 0.2,
+                seed: 3,
+            })),
+            // Shotgun: a long boom, then the pump.
+            add(with_action(
+                shot(Gun {
+                    crack: 0.6,
+                    body: 2.2,
+                    thump_hz: 90.0,
+                    thump: 1.0,
+                    decay: 6.5,
+                    secs: 0.6,
+                    seed: 4,
+                }),
+                &[(0.32, 0.05), (0.52, 0.06)],
+            )),
+            // Sniper: a big crack with a rolling tail, then the bolt.
+            add(with_action(
+                shot(Gun {
+                    crack: 1.0,
+                    body: 2.4,
+                    thump_hz: 110.0,
+                    thump: 1.0,
+                    decay: 4.5,
+                    secs: 0.9,
+                    seed: 5,
+                }),
+                &[(0.62, 0.04), (0.78, 0.05), (0.98, 0.04)],
+            )),
+        ],
+        zoom: add(click(0.015)),
         hit: add(tone(&[(1900.0, 0.045)], 70.0)),
         kill: add(tone(&[(880.0, 0.07), (1320.0, 0.16)], 18.0)),
         click: add(click(0.025)),
@@ -64,24 +124,53 @@ fn samples(secs: f32) -> usize {
     (secs * RATE as f32) as usize
 }
 
-/// A punchy rifle crack: filtered noise burst plus a falling low thump.
-fn shot() -> Vec<f32> {
-    let mut noise = Noise(0x1234_5678);
+struct Gun {
+    crack: f32,
+    body: f32,
+    thump_hz: f32,
+    thump: f32,
+    decay: f32,
+    secs: f32,
+    seed: u32,
+}
+
+/// A gunshot: a filtered noise crack, a noise body, and a falling low thump.
+fn shot(g: Gun) -> Vec<f32> {
+    let mut noise = Noise(0x1234_5678 ^ g.seed.wrapping_mul(0x9E37_79B9));
     let mut low = 0.0;
     let mut phase = 0.0;
-    (0..samples(0.34))
+    (0..samples(g.secs))
         .map(|i| {
             let t = i as f32 / RATE as f32;
             let n = noise.next();
             low += (n - low) * 0.18;
-            let crack = n * (-t * 60.0).exp() * 0.7;
-            let body = low * (-t * 11.0).exp() * 1.6;
-            let freq = 140.0 * (-t * 9.0).exp() + 45.0;
+            let crack = n * (-t * 60.0).exp() * g.crack;
+            let body = low * (-t * g.decay).exp() * g.body;
+            let freq = g.thump_hz * (-t * 9.0).exp() + 45.0;
             phase += freq / RATE as f32 * TAU;
-            let thump = phase.sin() * (-t * 16.0).exp() * 0.8;
+            let thump = phase.sin() * (-t * 16.0).exp() * g.thump;
             ((crack + body + thump) * 0.8).clamp(-1.0, 1.0)
         })
         .collect()
+}
+
+/// Mix mechanical clicks (start seconds, length) into a shot: pump or bolt.
+fn with_action(mut samples_in: Vec<f32>, clicks: &[(f32, f32)]) -> Vec<f32> {
+    let end = clicks
+        .iter()
+        .map(|(at, len)| samples(at + len))
+        .max()
+        .unwrap_or(0);
+    if samples_in.len() < end {
+        samples_in.resize(end, 0.0);
+    }
+    for &(at, len) in clicks {
+        let start = samples(at);
+        for (i, v) in click(len).into_iter().enumerate() {
+            samples_in[start + i] += v * 1.4;
+        }
+    }
+    samples_in
 }
 
 fn tone(notes: &[(f32, f32)], decay: f32) -> Vec<f32> {

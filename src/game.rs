@@ -11,14 +11,12 @@ use crate::{
     Layer,
     level::{DUMMIES, SPAWNS},
     net::{
-        Downed, Dummy, Feed, Fire, Health, HitConfirm, LocalName, MoveInput, Player, PlayerName,
-        Pose, Respawn, Score, SetName, ShotFx, Suicide,
+        Downed, Dummy, Feed, Fire, Health, HitConfirm, Loadout, LocalName, MoveInput, Player,
+        PlayerName, Pose, Respawn, Score, SelectWeapon, SetName, ShotFx, Suicide,
     },
 };
 
 pub const MAX_HEALTH: f32 = 100.0;
-const BODY_DAMAGE: f32 = 20.0;
-const HEAD_DAMAGE: f32 = 55.0;
 const RANGE: f32 = 250.0;
 const DUMMY_DOWN_SECS: f32 = 3.0;
 
@@ -38,6 +36,7 @@ pub(super) fn plugin(app: &mut App) {
             receive_names,
             receive_moves,
             receive_fire,
+            receive_select,
             receive_suicide,
         )
             .chain()
@@ -75,6 +74,7 @@ fn spawn_player(
         PlayerName(name),
         Health(MAX_HEALTH),
         Score::default(),
+        Loadout::default(),
         Pose {
             pos,
             yaw,
@@ -252,70 +252,108 @@ fn receive_fire(
         let Some(shooter) = find_player(*client_id, &clients) else {
             continue;
         };
-        let Ok(dir) = Dir3::new(message.dir) else {
-            continue;
-        };
+        let def = message.weapon.def();
         let origin = message.origin;
-        if !origin.is_finite() {
+        if !origin.is_finite() || message.dirs.len() > def.pellets as usize {
             continue;
         }
         let filter = SpatialQueryFilter::from_mask([Layer::World, Layer::Hitbox])
             .with_excluded_entities([shooter]);
-        let hit = spatial.cast_ray(origin, dir, RANGE, true, &filter);
-        let (end, normal) = match hit {
-            Some(hit) => (origin + dir * hit.distance, hit.normal),
-            None => (origin + dir * RANGE, Vec3::ZERO),
-        };
 
-        let mut flesh = false;
-        if let Some(hit) = hit
-            && let Ok((mut health, pose, is_player, downed)) = targets.get_mut(hit.entity)
-            && !downed
-        {
-            flesh = true;
-            let head = end.y > pose.pos.y + 0.48;
-            health.0 -= if head { HEAD_DAMAGE } else { BODY_DAMAGE };
-            let kill = health.0 <= 0.0;
-            confirm.write(ToClients {
-                targets: SendTargets::Single(*client_id),
-                message: HitConfirm { head, kill },
-            });
-            if kill && is_player {
-                health.0 = MAX_HEALTH;
-                if let Ok(mut score) = scores.get_mut(hit.entity) {
-                    score.deaths += 1;
+        let mut any_hit = false;
+        let mut any_head = false;
+        let mut any_kill = false;
+        // A target killed by an earlier pellet has already respawned at full
+        // health, so the rest of this blast must not touch it.
+        let mut killed: Vec<Entity> = Vec::new();
+
+        for dir in &message.dirs {
+            let Ok(dir) = Dir3::new(*dir) else {
+                continue;
+            };
+            let hit = spatial.cast_ray(origin, dir, RANGE, true, &filter);
+            let (end, normal) = match hit {
+                Some(hit) => (origin + dir * hit.distance, hit.normal),
+                None => (origin + dir * RANGE, Vec3::ZERO),
+            };
+            let mut flesh = false;
+            if let Some(hit) = hit
+                && !killed.contains(&hit.entity)
+                && let Ok((mut health, pose, is_player, downed)) = targets.get_mut(hit.entity)
+                && !downed
+            {
+                flesh = true;
+                any_hit = true;
+                let head = end.y > pose.pos.y + 0.48;
+                any_head |= head;
+                let falloff = def.falloff_per_10m.powf(hit.distance / 10.0);
+                let mult = if head { def.head_mult } else { 1.0 };
+                health.0 -= def.damage * mult * falloff;
+                if health.0 <= 0.0 {
+                    any_kill = true;
+                    killed.push(hit.entity);
+                    if is_player {
+                        health.0 = MAX_HEALTH;
+                        if let Ok(mut score) = scores.get_mut(hit.entity) {
+                            score.deaths += 1;
+                        }
+                        if let Ok(mut score) = scores.get_mut(shooter) {
+                            score.kills += 1;
+                        }
+                        let killer = names.get(shooter).map(|n| n.0.as_str()).unwrap_or("?");
+                        let victim = names.get(hit.entity).map(|n| n.0.as_str()).unwrap_or("?");
+                        let how = if head { " (headshot)" } else { "" };
+                        feed.write(ToClients {
+                            targets: SendTargets::All,
+                            message: Feed(format!("{killer} [{}] {victim}{how}", def.name)),
+                        });
+                        if let Ok((_, victim_client)) = clients.get(hit.entity) {
+                            respawn(victim_client.0, &mut respawns);
+                        }
+                    } else {
+                        health.0 = 0.0;
+                        commands.entity(hit.entity).insert((
+                            Downed,
+                            DownTimer(Timer::from_seconds(DUMMY_DOWN_SECS, TimerMode::Once)),
+                        ));
+                    }
                 }
-                if let Ok(mut score) = scores.get_mut(shooter) {
-                    score.kills += 1;
-                }
-                let killer = names.get(shooter).map(|n| n.0.as_str()).unwrap_or("?");
-                let victim = names.get(hit.entity).map(|n| n.0.as_str()).unwrap_or("?");
-                let how = if head { " (headshot)" } else { "" };
-                feed.write(ToClients {
-                    targets: SendTargets::All,
-                    message: Feed(format!("{killer} fragged {victim}{how}")),
-                });
-                if let Some(victim_client) = clients.get(hit.entity).ok().map(|(_, c)| c.0) {
-                    respawn(victim_client, &mut respawns);
-                }
-            } else if kill {
-                health.0 = 0.0;
-                commands.entity(hit.entity).insert((
-                    Downed,
-                    DownTimer(Timer::from_seconds(DUMMY_DOWN_SECS, TimerMode::Once)),
-                ));
             }
+            fx.write(ToClients {
+                targets: SendTargets::AllExcept(*client_id),
+                message: ShotFx {
+                    weapon: message.weapon,
+                    origin,
+                    end,
+                    normal,
+                    flesh,
+                },
+            });
         }
 
-        fx.write(ToClients {
-            targets: SendTargets::AllExcept(*client_id),
-            message: ShotFx {
-                origin,
-                end,
-                normal,
-                flesh,
-            },
-        });
+        if any_hit {
+            confirm.write(ToClients {
+                targets: SendTargets::Single(*client_id),
+                message: HitConfirm {
+                    head: any_head,
+                    kill: any_kill,
+                },
+            });
+        }
+    }
+}
+
+fn receive_select(
+    mut selects: MessageReader<FromClient<SelectWeapon>>,
+    clients: Query<(Entity, &PlayerClient)>,
+    mut loadouts: Query<&mut Loadout>,
+) {
+    for FromClient { client_id, message } in selects.read() {
+        if let Some(entity) = find_player(*client_id, &clients)
+            && let Ok(mut loadout) = loadouts.get_mut(entity)
+        {
+            loadout.set_if_neq(Loadout(message.0));
+        }
     }
 }
 

@@ -23,6 +23,7 @@ use bevy_replicon_renet::{
 use serde::{Deserialize, Serialize};
 
 use crate::console::{Console, ConsoleAppExt, ConsoleCommand, Print, SaveSetting};
+use crate::weapon::WeaponKind;
 
 pub const DEFAULT_PORT: u16 = 27015;
 const DISCOVERY_PORT: u16 = 27016;
@@ -55,6 +56,10 @@ pub struct Pose {
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct Health(pub f32);
 
+/// The weapon a player is holding.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
+pub struct Loadout(pub WeaponKind);
+
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default)]
 pub struct Score {
     pub kills: u32,
@@ -81,12 +86,17 @@ pub struct Downed;
 #[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct MoveInput(pub Pose);
 
-/// Client -> server: I fired from `origin` toward `dir`.
-#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
+/// Client -> server: I fired `weapon` from `origin`; one direction per pellet.
+#[derive(Message, Serialize, Deserialize, Clone, Debug)]
 pub struct Fire {
+    pub weapon: WeaponKind,
     pub origin: Vec3,
-    pub dir: Vec3,
+    pub dirs: Vec<Vec3>,
 }
+
+/// Client -> server: I switched weapons (so others see it).
+#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct SelectWeapon(pub WeaponKind);
 
 #[derive(Message, Serialize, Deserialize, Clone, Debug)]
 pub struct SetName(pub String);
@@ -94,9 +104,10 @@ pub struct SetName(pub String);
 #[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct Suicide;
 
-/// Server -> clients: someone else's shot, for tracers and impacts.
+/// Server -> clients: someone else's shot (one per pellet), for tracers and impacts.
 #[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct ShotFx {
+    pub weapon: WeaponKind,
     pub origin: Vec3,
     pub end: Vec3,
     pub normal: Vec3,
@@ -148,10 +159,12 @@ pub(super) fn plugin(app: &mut App) {
         .replicate::<Pose>()
         .replicate::<Health>()
         .replicate::<Score>()
+        .replicate::<Loadout>()
         .replicate::<Dummy>()
         .replicate::<Downed>()
         .add_client_message::<MoveInput>(Channel::Unreliable)
         .add_client_message::<Fire>(Channel::Ordered)
+        .add_client_message::<SelectWeapon>(Channel::Ordered)
         .add_client_message::<SetName>(Channel::Ordered)
         .add_client_message::<Suicide>(Channel::Ordered)
         .add_server_message::<ShotFx>(Channel::Unreliable)

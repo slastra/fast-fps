@@ -16,7 +16,7 @@ use bevy::{
 
 use crate::{
     console::{ConsoleAppExt, ConsoleCommand, Print},
-    player::LocalPlayer,
+    player::{LocalPlayer, ViewRig},
     render::{WorldCamera, fog, set_anti_aliasing},
     weapon::{GunRoot, ScriptedFire},
 };
@@ -196,7 +196,7 @@ fn spin(
     time: Res<Time>,
     spin: Res<Spin>,
     mut pending_look: ResMut<PendingLook>,
-    mut camera: Single<&mut Transform, (With<WorldCamera>, Without<LocalPlayer>)>,
+    mut camera: Single<&mut Transform, (With<ViewRig>, Without<LocalPlayer>)>,
 ) {
     if let Some(rotation) = pending_look.0.take() {
         camera.rotation = rotation;

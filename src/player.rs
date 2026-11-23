@@ -20,7 +20,8 @@ use crate::{
     console::{Console, ConsoleAppExt, ConsoleCommand, Print, SaveSetting},
     lowpoly,
     net::{Downed, Dummy, LocalId, MoveInput, Player, Pose, Respawn, Suicide},
-    render::{self, Sky, WorldCamera},
+    render::{self, DEFAULT_FOV, Sky, WorldCamera},
+    weapon::{self, Zoom},
 };
 
 const DEFAULT_SENS: f32 = 0.07;
@@ -29,6 +30,7 @@ const KILL_HEIGHT: f32 = -15.0;
 pub(super) fn plugin(app: &mut App) {
     app.add_input_context::<PlayerInput>()
         .init_resource::<GameInput>()
+        .init_resource::<ViewSettings>()
         .add_systems(Startup, spawn_local_player)
         .add_systems(
             PreUpdate,
@@ -41,6 +43,7 @@ pub(super) fn plugin(app: &mut App) {
             Update,
             (
                 send_move,
+                apply_view,
                 fall_out,
                 player_commands,
                 smooth_remote,
@@ -59,6 +62,27 @@ pub(super) fn plugin(app: &mut App) {
 /// The kinematic character controller owned by this machine. Never replicated.
 #[derive(Component)]
 pub struct LocalPlayer;
+
+/// What the mouse turns. Ahoy writes yaw and pitch here; the camera is a
+/// child of it so recoil can punch the view without moving your aim.
+#[derive(Component)]
+pub struct ViewRig;
+
+/// Mouse sensitivity and field of view, before any scope zoom.
+#[derive(Resource)]
+pub struct ViewSettings {
+    pub sens: f32,
+    pub fov: f32,
+}
+
+impl Default for ViewSettings {
+    fn default() -> Self {
+        Self {
+            sens: DEFAULT_SENS,
+            fov: DEFAULT_FOV,
+        }
+    }
+}
 
 /// Whether gameplay input should reach the character this frame.
 #[derive(Resource, Default)]
@@ -149,11 +173,37 @@ fn spawn_local_player(mut commands: Commands, sky: Res<Sky>) {
         ))
         .id();
 
-    commands.spawn((
-        Name::new("Player camera"),
-        CharacterControllerCameraOf::new(player),
-        render::world_camera(&sky),
-    ));
+    commands
+        .spawn((
+            Name::new("View rig"),
+            ViewRig,
+            CharacterControllerCameraOf::new(player),
+            Visibility::default(),
+        ))
+        .with_child((Name::new("Player camera"), render::world_camera(&sky)));
+}
+
+/// Apply sensitivity and FOV, scaled by the scope zoom so the mouse moves the
+/// same distance on screen per count whether zoomed or not.
+fn apply_view(
+    settings: Res<ViewSettings>,
+    zoom: Res<Zoom>,
+    mut projection: Single<&mut Projection, With<WorldCamera>>,
+    mut bindings: Query<(&Binding, &mut Scale)>,
+) {
+    let half = (settings.fov.to_radians() / 2.0).tan() * zoom.0;
+    let fov = 2.0 * half.atan();
+    if let Projection::Perspective(p) = &mut **projection
+        && (p.fov - fov).abs() > 1e-4
+    {
+        p.fov = fov;
+    }
+    let sens = Scale::splat(settings.sens * zoom.0);
+    for (binding, mut scale) in &mut bindings {
+        if matches!(binding, Binding::MouseMotion { .. }) && scale.factor != sens.factor {
+            *scale = sens;
+        }
+    }
 }
 
 fn update_game_input(
@@ -202,7 +252,7 @@ pub fn yaw_pitch(rotation: Quat) -> (f32, f32) {
 
 fn send_move(
     player: Single<&Transform, With<LocalPlayer>>,
-    camera: Single<&Transform, With<WorldCamera>>,
+    camera: Single<&Transform, With<ViewRig>>,
     mut moves: MessageWriter<MoveInput>,
 ) {
     let (yaw, pitch) = yaw_pitch(camera.rotation);
@@ -216,7 +266,7 @@ fn send_move(
 fn apply_respawn(
     mut respawns: MessageReader<Respawn>,
     mut player: Single<(&mut Transform, &mut Position, &mut LinearVelocity), With<LocalPlayer>>,
-    mut camera: Single<&mut Transform, (With<WorldCamera>, Without<LocalPlayer>)>,
+    mut camera: Single<&mut Transform, (With<ViewRig>, Without<LocalPlayer>)>,
 ) {
     let Some(respawn) = respawns.read().last() else {
         return;
@@ -246,8 +296,7 @@ fn player_commands(
     mut print: MessageWriter<Print>,
     mut suicide: MessageWriter<Suicide>,
     mut save: MessageWriter<SaveSetting>,
-    mut bindings: Query<(&Binding, &mut Scale)>,
-    mut projections: Query<&mut Projection, With<WorldCamera>>,
+    mut settings: ResMut<ViewSettings>,
     local: Query<&Transform, With<LocalPlayer>>,
     cameras: Query<&GlobalTransform, With<WorldCamera>>,
 ) {
@@ -255,39 +304,24 @@ fn player_commands(
         match cmd.name.as_str() {
             "sens" => {
                 let Some(value) = cmd.arg(0).and_then(|v| v.parse::<f32>().ok()) else {
-                    let current = bindings
-                        .iter()
-                        .find(|(b, _)| matches!(b, Binding::MouseMotion { .. }))
-                        .map(|(_, s)| s.factor.x)
-                        .unwrap_or(DEFAULT_SENS);
-                    print.write(Print(format!("sens is {current}")));
+                    print.write(Print(format!("sens is {}", settings.sens)));
                     continue;
                 };
-                let value = value.clamp(0.001, 2.0);
-                for (binding, mut scale) in &mut bindings {
-                    if matches!(binding, Binding::MouseMotion { .. }) {
-                        *scale = Scale::splat(value);
-                    }
-                }
+                settings.sens = value.clamp(0.001, 2.0);
                 save.write(SaveSetting {
                     key: "sens",
-                    value: value.to_string(),
+                    value: settings.sens.to_string(),
                 });
             }
             "fov" => {
                 let Some(value) = cmd.arg(0).and_then(|v| v.parse::<f32>().ok()) else {
-                    print.write(Print::new("usage: fov <degrees>"));
+                    print.write(Print(format!("fov is {}", settings.fov)));
                     continue;
                 };
-                let value = value.clamp(50.0, 120.0);
-                for mut projection in &mut projections {
-                    if let Projection::Perspective(p) = &mut *projection {
-                        p.fov = value.to_radians();
-                    }
-                }
+                settings.fov = value.clamp(50.0, 120.0);
                 save.write(SaveSetting {
                     key: "fov",
-                    value: value.to_string(),
+                    value: settings.fov.to_string(),
                 });
             }
             "kill" => {
@@ -376,7 +410,6 @@ fn dress_player(
         color.darker(0.12),
         &mut rng,
     );
-    let gun = part(&mut meshes, Vec3::new(0.09, 0.12, 0.62), dark, &mut rng);
     let visor_mesh = Mesh3d(meshes.add(Cuboid::new(0.28, 0.08, 0.04)));
 
     commands.entity(add.entity).with_children(|body| {
@@ -395,7 +428,7 @@ fn dress_player(
                 Transform::from_xyz(0.0, 0.2, -0.17),
                 render::no_shadow(),
             ));
-            pivot.spawn((gun, mat.clone(), Transform::from_xyz(0.3, -0.2, -0.3)));
+            weapon::spawn_avatar_guns(pivot, &mut meshes, &mat, &mut rng);
         });
     });
 }

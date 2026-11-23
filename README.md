@@ -17,7 +17,24 @@ cargo run
 ```
 
 Click to grab the mouse. WASD, Space to jump (hold to mantle), Ctrl or C to crouch, left
-click to fire, R to reload, Tab for scores, Esc to release the mouse.
+click to fire, right click to scope (sniper), R to reload, 1-5 or the wheel to switch
+weapons, Q for the last weapon, Tab for scores, Esc to release the mouse.
+
+## Weapons
+
+| | Fire | Mag | Damage (head) | Notes |
+|---|---|---|---|---|
+| AK | auto, 600 rpm | 30 | 34 (136) | climbs 9 shots, then snakes left, right, left |
+| MP5 | auto, 800 rpm | 30 | 24 (72) | gentle climb, falls off with range |
+| Glock | semi | 20 | 22 (70) | gets wild if you click too fast |
+| Shotgun | pump | 8 | 9 x 17 (27) | wide fixed spread, short range |
+| Sniper | bolt | 5 | 115 (230) | only accurate scoped and still; two zoom levels |
+
+Spraying works like Counter-Strike. Each automatic weapon follows a fixed pattern, so the
+same spray lands in the same shape every time. The view kicks along half of it; pull the
+mouse down against it to keep shots on target. On top of the pattern there's a random cone
+that grows when moving, jumping or spraying and shrinks when crouched. The crosshair gap is
+that cone, projected to the screen.
 
 ## Play on a LAN
 
@@ -38,6 +55,7 @@ Launch arguments are console commands, so `cargo run -- +name alice +host` works
 | `host [port]`, `connect [ip[:port]]`, `disconnect`, `find`, `status` | networking |
 | `name <name>`, `sens <value>`, `fov <degrees>` | saved to `~/.config/fast-fps/config.cfg` |
 | `kill` | respawn |
+| `weapon <name>`, `zoom <level>` | weapons |
 | `r_aa <smaa\|taa\|fxaa\|off>`, `r_ssao`, `r_bloom`, `r_fog`, `r_contact`, `r_shadows`, `r_viewmodel` | render switches |
 | `exec <file>`, `wait <secs>`, `screenshot <name>`, `tp`, `look`, `spin`, `fire`, `pos` | scripting and testing |
 
@@ -65,6 +83,7 @@ Nothing injects input; the scripts drive the game from inside.
 
 ```sh
 scripts/harness.sh tests/harness/artifacts.cfg                       # render check while turning
+scripts/harness.sh -s 1920x1080 tests/harness/spray.cfg              # every weapon's spray on a wall
 scripts/harness.sh tests/harness/lan_host.cfg tests/harness/lan_client.cfg   # host + client
 scripts/harness.sh -v tests/harness/viewmodel.cfg                    # visible, nested sway
 ```
