@@ -2,7 +2,7 @@
 
 Low-poly LAN shooter and game boilerplate with spray patterns, ragdolls, and a scripted test harness.
 
-![Bots firing in a line](docs/img/bots-firing.jpg)
+![The keep at dusk](docs/img/dusk.jpg)
 
 A small first-person shooter in [Bevy](https://bevyengine.org/) 0.20, built to be copied and
 turned into your own game. There are no menus. Everything runs from the `~` console, and the
@@ -12,13 +12,15 @@ coding agents.
 ## Features
 
 - **Five guns** with fixed, learnable spray patterns, and a crosshair that shows your real accuracy
+- **Four skies**: night, dusk, dawn and day, switched live from the console
+- **A minimal HUD** whose weapon icons are rendered from the gun models themselves
 - **Animated players** with no keyframes: legs and arms are solved in code with inverse kinematics
 - **Ragdolls** built from the exact pose a player died in
 - **LAN multiplayer** with one-command hosting and automatic server discovery
 - **Practice bots** you can order around from the console
 - **A test harness** that scripts the real game and reports PASS or FAIL
 - **One command to start a new game** from this one, under its own name
-- **No asset pipeline**: the map, guns, bodies and sounds are generated from code
+- **No asset pipeline**: the map, sky, guns, icons, bodies and sounds are generated from code
 
 ## Install
 
@@ -46,7 +48,10 @@ Click to grab the mouse. WASD to move, Space to jump (hold at a ledge to climb),
 crouch, left click to fire, right click to scope (sniper), R to reload, 1-5 or the wheel to
 switch weapons, Q for the last weapon, Tab for scores, Esc to release the mouse.
 
-For something to shoot at, press `~` and type `exec cfg/bots.cfg`.
+For something to shoot at, press `~` and type `exec cfg/bots.cfg`. To change the time of day,
+type `sky night`, `sky dusk`, `sky dawn`, `sky day`, or `sky next` to cycle.
+
+![Night, dusk, dawn and day](docs/img/skies.jpg)
 
 To play on a LAN, one machine hosts and the others join. Press `~`, then:
 
@@ -61,14 +66,15 @@ Launch arguments are console commands too: `cargo run -- +name alice +host`.
 
 ## Configuration
 
-`name`, `sens` (mouse sensitivity) and `fov` are saved when you set them in the console. They
-live in `~/.config/fast-fps/config.cfg`, which is a list of console commands run at startup.
+`name`, `sens` (mouse sensitivity), `fov` and `sky` are saved when you set them in the console.
+They live in `~/.config/fast-fps/config.cfg`, which is a list of console commands run at startup.
 
 Game rules are constants in the source:
 
 - `src/config.rs`: health, run speed, jump height, gravity, ports
 - `src/weapon/defs.rs`: the guns and their spray patterns
 - `src/world/arena.rs`: the map
+- `src/sky.rs`: the look of each time of day
 
 ## Make your own game
 
@@ -78,7 +84,7 @@ scripts/new-game.sh ~/Projects/Rust/space-arena
 
 That makes a complete, working copy under a new name. It gets its own window title, settings
 folder and network protocol, so it can never join a game of the original by accident. The
-three files under Configuration change a game's character the most.
+four files under Configuration change a game's character the most.
 
 ## How it works
 
@@ -106,6 +112,18 @@ the way the shot was going. The gun drops separately.
 
 ![Ragdolls](docs/img/ragdolls.jpg)
 
+![Bots firing](docs/img/bots-firing.jpg)
+
+**The look.** Everything is flat-shaded with color baked into each face. Boxes have beveled,
+slightly lighter edges so they catch the light. The sky is a faceted dome with stars, a moon
+or sun and drifting clouds, and each time of day sets its own light, fog and exposure.
+
+**The HUD.** Large numerals, thin bars, and nothing that isn't needed right now: the weapon
+slots only appear when you switch. Weapon icons are side-on renders of the gun models, so a
+new gun gets its icon for free.
+
+![Kill feed and weapon panel](docs/img/hud.jpg)
+
 **Networking.** One machine is the authority for damage, score and spawning, and the same
 code runs offline. Each player simulates their own movement and reports it. That trusts
 clients, which is fine for a LAN.
@@ -131,8 +149,9 @@ scripts/check.sh             # everything, including every scripted scenario
 The look follows Jan Hohenheim's [Foxtrot](https://github.com/janhohenheim/foxtrot) demo.
 Movement is his [bevy_ahoy](https://github.com/janhohenheim/bevy_ahoy), physics is
 [Avian](https://github.com/Jondolf/avian), and networking is
-[bevy_replicon](https://github.com/simgine/bevy_replicon) over renet. Night Sky HDRI 001 by
-ambientCG, CC0. Project structure started from
+[bevy_replicon](https://github.com/simgine/bevy_replicon) over renet. The HUD typeface is
+[Martian Grotesk](https://github.com/evilmartians/grotesk) by Evil Martians, under the SIL
+Open Font License (see `assets/fonts/OFL.txt`). Project structure started from
 [bevy_new_2d](https://github.com/TheBevyFlock/bevy_new_2d).
 
 ## License

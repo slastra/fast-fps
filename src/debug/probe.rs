@@ -33,6 +33,7 @@ use crate::{
     console::{ConsoleAppExt, ConsoleCommand, Print, ScriptHold},
     net::{Downed, Dummy, Health, LocalId, LocalName, Player, Score},
     player::{LocalPlayer, ViewSettings},
+    sky::Sky,
     weapon::{Arsenal, fx::Decal},
 };
 
@@ -146,6 +147,7 @@ fn collect(
     arsenal: &Arsenal,
     (body, velocity, controller): (&Transform, &LinearVelocity, &CharacterControllerState),
     view: &ViewSettings,
+    sky: &Sky,
     fps: f64,
 ) {
     let mode = if hosting {
@@ -189,6 +191,7 @@ fn collect(
     probe.set("grounded", u8::from(controller.grounded.is_some()));
     probe.set("crouching", u8::from(controller.crouching));
 
+    probe.set("sky", sky.kind.name());
     probe.set("sens", view.sens);
     probe.set("fov", view.fov);
 }
@@ -209,7 +212,7 @@ fn probe(
     ),
     arsenal: Res<Arsenal>,
     body: Single<(&Transform, &LinearVelocity, &CharacterControllerState), With<LocalPlayer>>,
-    view: Res<ViewSettings>,
+    (view, sky): (Res<ViewSettings>, Res<Sky>),
     diagnostics: Res<DiagnosticsStore>,
 ) {
     let wanted: Vec<&ConsoleCommand> = cmds
@@ -239,6 +242,7 @@ fn probe(
         &arsenal,
         *body,
         &view,
+        &sky,
         fps,
     );
 

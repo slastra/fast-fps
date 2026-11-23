@@ -120,7 +120,8 @@ How scripts run:
 | `fire [N]` | Pull the trigger N times (as fast as the weapon allows). |
 | `weapon NAME`, `zoom LEVEL` | Switch weapon; set the sniper scope level (0 is unscoped). |
 | `bot [X Y Z YAW]`, `bot_do ID ORDER [ARG]` | Spawn and direct practice bots. See below. |
-| `r_ambient N`, `r_viewmodel 0` | Flat fill light (try 12) and hiding your own gun, for clear screenshots. |
+| `sky day`, `r_viewmodel 0` | Daylight and hiding your own gun, for clear screenshots. |
+| `reload`, `scoreboard 1` | Things a player does with a key, for scripts. |
 | `host PORT`, `connect IP:PORT`, `disconnect` | Multiplayer. |
 
 `OP` is one of `== != < <= > >=`. Values that look like numbers compare as numbers (`==`
@@ -147,6 +148,7 @@ allows a tiny rounding error); anything else compares as text, ignoring case, wi
 | `decals` | bullet holes in the world |
 | `dummies_down` | practice dummies currently knocked over |
 | `sens`, `fov` | view settings |
+| `sky` | `night`, `dusk`, `dawn` or `day` |
 | `name`, `time`, `fps` | your name, game seconds since start, frame rate |
 
 To check something of your own, publish it from any system and it becomes a key:
@@ -194,8 +196,9 @@ assert kills == 1
 
 Screenshots are the only way to verify anything visual. Two habits make them useful:
 
-- Light the scene and clear the view at the top of the script: `r_ambient 12` and
-  `r_viewmodel 0`. The map is a night scene and your own gun covers a third of the frame.
+- Light the scene and clear the view at the top of the script: `sky day` and `r_viewmodel 0`.
+  The default sky is dusk, which is moody but hides detail, and your own gun covers a third of
+  the frame. (`r_ambient 12` adds flat fill light under any sky.)
 - Take two shots a few frames apart (`wait 0.13`) for anything that moves, so a frozen
   animation or a one-frame glitch shows up.
 
@@ -233,6 +236,8 @@ Use a port other than 27015 so the test can run while a real game is hosting.
 | `ragdoll.cfg` | Three kills each leave a ragdoll, and they all fade away. |
 | `anim.cfg` | Screenshots of every animation state, pose and weapon hold. For looking at. |
 | `artifacts.cfg` | Screenshots while turning, in two anti-aliasing modes. For looking at. |
+| `hud.cfg` | Every HUD state: slots, low ammo, reloading, kill feed, scoreboard. |
+| `look.cfg` | The same views under all four skies, plus close-ups. For looking at. |
 | `lan_host.cfg` + `lan_client.cfg` | A client joins, sees the host's bots, kills one, and both sides see the corpse. |
 | `settings_save.cfg` then `settings_load.cfg` | Settings survive a restart (they share a `-c` folder). |
 
@@ -242,7 +247,7 @@ Use a port other than 27015 so the test can run while a real game is hosting.
 - **Timed out**: read `console.txt` to see the last line that ran. Usually a `wait_until` that
   can never be true, or a machine slower than the timeout allows (`-t 300`).
 - **A screenshot is black or empty**: you are inside or facing a wall (`state x y z`, then
-  move), or it is simply night (`r_ambient 12`).
+  move), or it is simply dark (`sky day`).
 - **"could not host: Address already in use"**: another instance has that port. Pick another.
 - **It passes here and fails on another machine**: look for a fixed `wait` that should be a
   `wait_until`.
@@ -255,7 +260,7 @@ Use a port other than 27015 so the test can run while a real game is hosting.
   runtime folder, and runs the game binary in it with `+name <script> +exec <script>`.
 - It sets `HARNESS=1`, which makes the game compile shaders before drawing instead of in the
   background, so a screenshot is never of a half-drawn scene. `SCREENSHOT_DIR` tells
-  `screenshot` where to save.
+  `screenshot` where to save. Scripts also wait for the HUD font to load.
 - The script engine is `src/console/script.rs`. `assert`, `wait_until` and `state` are in
   `src/debug/probe.rs`. `screenshot`, `tp`, `look` are in `src/debug/mod.rs`.
 - Anything that must finish before the next script line takes a `ScriptHold`

@@ -10,8 +10,8 @@ Every source file starts with a comment saying what it is for. This page is the 
   spawning. "Server" includes playing offline: the same code runs either way.
 - **You move yourself.** Each machine simulates its own character and tells the server where
   it is. That trusts clients, which is fine among friends on a LAN.
-- **Looks are generated.** The map, the guns, the bodies and the sounds are all built from
-  code at startup. The only asset file is the night sky.
+- **Looks are generated.** The map, the sky, the guns and their icons, the bodies and the
+  sounds are all built from code at startup. The only asset file is the HUD font.
 
 ## Folders
 
@@ -20,8 +20,9 @@ src/
   main.rs        Assembles the app from the plugins below. Nothing else.
   config.rs      The game's name and the numbers you are most likely to tune.
   physics.rs     Collision layers: who can touch whom.
-  render.rs      The camera and the look: night sky, bloom, fog, anti-aliasing.
-  lowpoly.rs     Helpers for the faceted look (flat shading, per-face color).
+  render.rs      The camera and its post-processing: bloom, shadows, anti-aliasing.
+  sky.rs         The four times of day: sky dome, sun or moon, light, fog, exposure.
+  lowpoly.rs     The shape kit: beveled blocks, crates, barrels, rocks, pines, grass.
 
   console/       The drop-down console. The whole user interface.
     mod.rs         Commands, the registry, typing, `help`.
@@ -52,6 +53,7 @@ src/
     arsenal.rs     What you're holding, switching, the scope.
     firing.rs      Accuracy, shooting, reloading, recoil.
     view_model.rs  The gun on your screen and in other players' hands.
+    icons.rs       HUD icons, rendered from the gun models at startup.
     fx.rs          Tracers, sparks, bullet holes.
 
   avatar/        Other players' bodies.
@@ -62,11 +64,15 @@ src/
 
   world/         The map.
     arena.rs       The layout. Edit this to change the map.
-    builder.rs     block, ramp, rock, pine, pillar, crate_stack.
-    lights.rs      Lamps and the campfire.
+    builder.rs     block, trim, ramp, crate_stack, barrel, rock, bush, pine, pillar.
+    lights.rs      Lamps, the campfire, embers and fireflies.
     dummy.rs       How practice dummies look and react.
 
-  hud/           Crosshair, health, ammo, kill feed, scoreboard.
+  hud/           The heads-up display.
+    mod.rs         The theme and the layout: every element is spawned here.
+    crosshair.rs   Accuracy crosshair, reload bar, scope.
+    panels.rs      Health, weapon and ammo, slots, status, scoreboard.
+    feed.rs        The kill feed.
   sound/         Sound effects, synthesized at startup.
   debug/         Commands for testing: screenshot, tp, look, r_* switches, and the probe
                  (state / assert / wait_until).
@@ -77,7 +83,7 @@ scripts/
   new-game.sh    Start a new game from this project.
 tests/harness/   The scripted scenarios, and suite.txt listing what check.sh runs.
 cfg/             Console scripts for players (cfg/bots.cfg).
-assets/          The night-sky cubemaps.
+assets/          The HUD font and its license.
 ```
 
 ## What happens when you shoot someone

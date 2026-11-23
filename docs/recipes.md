@@ -55,7 +55,8 @@ Weapons are a fixed list. The compiler will point at most places you miss.
 5. **`src/avatar/ragdoll.rs`**: add it to `knock` (how hard it throws a body).
 6. Update the usage text of the `weapon` and `bot_do` commands (search for `sniper>`).
 
-Number keys, the HUD slots and the scroll wheel pick it up from `ALL` automatically.
+Number keys, the HUD slots and the scroll wheel pick it up from `ALL` automatically, and its
+HUD icon is rendered from the model you made in step 2.
 
 Check: `cargo test` (the animation tests cover every weapon), then add it to
 `tests/harness/spray.cfg` and look at the bullet holes.
@@ -67,21 +68,44 @@ The map is `spawn_level` in `src/world/arena.rs`. It is built from helpers on th
 
 | Helper | |
 |---|---|
-| `b.block(center, size, rotation, color, jitter)` | A box. `jitter` is how much each face's shade varies. |
+| `b.block(center, size, rotation, color, jitter)` | A beveled box you can stand on. `jitter` is how much each face's shade varies. |
+| `b.trim(center, size, color)` | A decorative box with **no** collision: ledges, beams, caps, banners. |
 | `b.ramp(low, high, width)` | A walkable ramp between two points on its surface. |
-| `b.crate_stack(base, count)` | A few crates. |
-| `b.rock(at, size)`, `b.pine(at, height, collide)`, `b.pillar(at, height)` | Scenery. |
+| `b.crate_stack(base, count)`, `b.barrel(at)` | Cover. |
+| `b.rock(at, size)`, `b.pine(at, height, collide)`, `b.pillar(at, height)` | Scenery with collision. |
+| `b.bush(at, size)` | Scenery without collision. |
 | `lamp(&mut b, at, lantern, shadows)`, `campfire(&mut b, at, flame)` | Lights (`world/lights.rs`). |
+
+New shapes go in `src/lowpoly.rs`: build a mesh, color it with `facet` or `block`, and add a
+builder helper that spawns it with a collider.
 
 Y is up, the ground is at 0, and a meter is a meter (a player is 1.8 tall). Also in
 `arena.rs`: `SPAWNS` (where players appear; Y 1.2 drops them onto the ground), `DUMMIES`, and
 `ARENA` (half the width of the walled square).
 
-Keep random placement on the seeded `b.rng`. Every machine builds the map itself, and they
-must all build the same one or shots will hit walls that aren't there for someone else.
+The builder has two random number generators. Use `b.rng` for anything with collision: every
+machine builds the map itself, and they must all build the same one or shots will hit walls
+that aren't there for someone else. Use `b.paint` for shading and decoration, so cosmetic
+changes never move the map. Leave the yard south of the keep empty (`in_yard`); the test
+scenarios use it as a stage.
 
-Check: a script that teleports to a few viewpoints with `r_ambient 12` and takes
-screenshots. Make sure no spawn point is inside something (`state x y z` after spawning).
+Check: a script that sets `sky day`, teleports to a few viewpoints and takes screenshots
+(`tests/harness/look.cfg` is a starting point). Make sure no spawn point is inside something (`state x y z` after spawning).
+
+## Change the sky or the mood
+
+Each time of day is one `Look` in `SkyKind::look` in `src/sky.rs`: sky colors from ground to
+zenith, where the sun or moon sits, the main light, the fill light, fog and exposure. Change
+the numbers and compare with `sky next` in the console.
+
+To add a time of day, add a variant to `SkyKind`, to `ALL` and `name`, and a `Look` for it.
+
+Three things to know. Sky colors are shown as written, while the light on the world is scaled
+by `ev100` (higher is darker), so a bright sky over a dark world means the exposure or the
+light is off, not the sky. Fog should sit close to the horizon color, so the far forest melts
+into the sky. And leave color grading contrast alone: it crushes dark scenes to black.
+
+Check: `scripts/harness.sh -s 1600x900 tests/harness/look.cfg` and look at the screenshots.
 
 ## Add a sound
 
@@ -152,8 +176,11 @@ frame exactly as a real client would report it. Add the name to the command's he
 ## Add to the HUD
 
 Every HUD element is spawned in `spawn_hud` in `src/hud/mod.rs` with a marker component, and
-updated by a small system in `src/hud/panels.rs` that finds it by that marker. Copy `AmmoText`
-and `vitals` as a pattern.
+updated by a small system in `src/hud/panels.rs` that finds it by that marker. Copy
+`HealthText` and `vitals` as a pattern. Use the `text` helper and the theme colors at the top
+of `hud/mod.rs` so new elements match. Sizes are in pixels at 720p and scale with the window.
+
+Check: `tests/harness/hud.cfg` shows every HUD state; add yours to it.
 
 ## Add a scenario to the test suite
 
@@ -168,5 +195,5 @@ scripts/new-game.sh ~/Projects/Rust/space-arena
 ```
 
 The copy has its own name in the window title, settings folder and network protocol, so it
-can't join a game of the original. Then make it yours: `src/config.rs`, `src/weapon/defs.rs`
-and `src/world/arena.rs` are the three files that change a game's character the most.
+can't join a game of the original. Then make it yours: `src/config.rs`, `src/weapon/defs.rs`,
+`src/world/arena.rs` and `src/sky.rs` are the files that change a game's character the most.

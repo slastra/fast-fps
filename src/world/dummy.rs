@@ -25,12 +25,7 @@ pub struct Wobble {
 }
 
 fn part(meshes: &mut Assets<Mesh>, size: Vec3, color: Color, rng: &mut StdRng) -> Mesh3d {
-    Mesh3d(meshes.add(lowpoly::facet(
-        Cuboid::from_size(size).mesh().build(),
-        color,
-        0.08,
-        rng,
-    )))
+    Mesh3d(meshes.add(lowpoly::block(size, color, 0.08, rng)))
 }
 
 pub fn dress_dummy(

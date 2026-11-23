@@ -173,6 +173,33 @@ pub struct Respawn {
     pub yaw: f32,
 }
 
-/// Server -> everyone: a line for the kill feed and console.
+/// Server -> everyone: something for the kill feed and console.
 #[derive(Message, Serialize, Deserialize, Clone, Debug)]
-pub struct Feed(pub String);
+pub enum Feed {
+    /// Someone joined, left, renamed or gave up.
+    Note(String),
+    Kill {
+        killer: String,
+        victim: String,
+        weapon: WeaponKind,
+        headshot: bool,
+    },
+}
+
+impl Feed {
+    /// The one-line form printed to the console.
+    pub fn text(&self) -> String {
+        match self {
+            Feed::Note(text) => text.clone(),
+            Feed::Kill {
+                killer,
+                victim,
+                weapon,
+                headshot,
+            } => {
+                let how = if *headshot { " (headshot)" } else { "" };
+                format!("{killer} [{}] {victim}{how}", weapon.def().name)
+            }
+        }
+    }
+}

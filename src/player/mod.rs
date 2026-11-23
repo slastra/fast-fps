@@ -24,7 +24,7 @@ use crate::{
     net::{MoveInput, Pose, Respawn, Suicide},
     physics::Layer,
     player::input::PlayerInput,
-    render::{self, Sky, WorldCamera},
+    render::{self, WorldCamera},
     weapon::Arsenal,
 };
 
@@ -42,7 +42,7 @@ pub(super) fn plugin(app: &mut App) {
 #[derive(Component)]
 pub struct LocalPlayer;
 
-fn spawn_local_player(mut commands: Commands, sky: Res<Sky>) {
+fn spawn_local_player(mut commands: Commands) {
     let start = Vec3::new(0.0, 1.2, 20.0);
     let player = commands
         .spawn((
@@ -72,7 +72,7 @@ fn spawn_local_player(mut commands: Commands, sky: Res<Sky>) {
             CharacterControllerCameraOf::new(player),
             Visibility::default(),
         ))
-        .with_child((Name::new("Player camera"), render::world_camera(&sky)));
+        .with_child((Name::new("Player camera"), render::world_camera()));
 }
 
 /// Yaw and pitch from a camera rotation (Y then X).

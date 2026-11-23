@@ -17,6 +17,7 @@ mod physics;
 mod player;
 mod render;
 mod server;
+mod sky;
 mod sound;
 mod weapon;
 mod world;
@@ -65,6 +66,7 @@ fn main() -> AppExit {
             console::plugin,
             net::plugin,
             render::plugin,
+            sky::plugin,
             sound::plugin,
             world::plugin,
             server::plugin,

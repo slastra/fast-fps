@@ -41,6 +41,8 @@ scripts/new-game.sh ~/Projects/Rust/my-game   # start a new game from this one
 | A number: health, run speed, jump height, ports | `src/config.rs` |
 | A weapon's stats or spray pattern, or add a weapon | `src/weapon/defs.rs` |
 | The map | `src/world/arena.rs` |
+| The sky, light, fog and mood of each time of day | `src/sky.rs` |
+| The shapes things are built from (blocks, crates, trees) | `src/lowpoly.rs` |
 | What gets sent over the network | `src/net/protocol.rs` |
 | Game rules: damage, kills, respawns | `src/server/` |
 | How other players look and move | `src/avatar/` |
@@ -62,6 +64,11 @@ scripts/new-game.sh ~/Projects/Rust/my-game   # start a new game from this one
 - **Make new state checkable.** If you add something a test should be able to see, publish it
   to the probe (`probe.set("coins", n)`, see `src/debug/probe.rs`) so scripts can `assert` it.
 - **Tunable numbers go in `src/config.rs`**, not scattered through the code.
+- **The level has two random number generators.** `b.rng` places things with collision and
+  must give the same map on every machine. `b.paint` is for shading and decoration. Never use
+  `rng` for looks, or a cosmetic change will move the map (see `world/builder.rs`).
+- **Light, fog and exposure belong to the sky.** Set them in a `Look` in `src/sky.rs`, not on
+  the camera or in the level, or the next `sky` change will overwrite them.
 - **One camera.** The first-person gun is drawn by the main camera, scaled toward the eye. Do
   not add a second camera for it (see Traps).
 - Keep `cargo fmt` and `cargo clippy --all-targets -- -D warnings` clean. `check.sh` enforces both.
@@ -87,6 +94,12 @@ Each of these cost real debugging time once.
   looks empty, that is why.
 - **Rust arrays indexed by weapon** are sized with `WeaponKind::COUNT`. Adding a weapon means
   following the recipe; the compiler finds most of what you miss.
+- **Color grading contrast crushes dark scenes.** Even `contrast = 1.05` turned the whole
+  world black at night. `sky.rs` only raises saturation.
+- **A dark screenshot is not always a lighting bug, and vice versa.** To judge geometry, switch
+  to `sky day` first; it is the clearest light.
+- **The yard south of the keep is kept empty on purpose** (`in_yard` in `world/arena.rs`). The
+  test scenarios use it as a stage; putting something there breaks them.
 - **Two instances can't share a UDP port.** The LAN scenario uses 27555 so it can run beside a
   real game on the default 27015.
 

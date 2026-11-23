@@ -9,7 +9,8 @@ use bevy::{
 
 use crate::{
     console::{ConsoleAppExt, ConsoleCommand, Print},
-    render::{WorldCamera, fog, set_anti_aliasing},
+    render::{WorldCamera, set_anti_aliasing},
+    sky::Sky,
     weapon::HideViewModel,
 };
 
@@ -61,6 +62,7 @@ fn render_switches(
     mut print: MessageWriter<Print>,
     world_camera: Single<Entity, With<WorldCamera>>,
     mut hide_view_model: ResMut<HideViewModel>,
+    sky: Res<Sky>,
     mut point_lights: Query<&mut PointLight>,
     mut directional: Query<&mut DirectionalLight>,
 ) {
@@ -100,7 +102,7 @@ fn render_switches(
                 ScreenSpaceAmbientOcclusion::default,
             ),
             "r_bloom" => toggle(&mut commands, camera, on, || Bloom::NATURAL),
-            "r_fog" => toggle::<DistanceFog>(&mut commands, camera, on, fog),
+            "r_fog" => toggle::<DistanceFog>(&mut commands, camera, on, || sky.kind.look().fog()),
             "r_contact" => toggle(&mut commands, camera, on, ContactShadows::default),
             "r_viewmodel" => hide_view_model.0 = !on,
             "r_shadows" => {

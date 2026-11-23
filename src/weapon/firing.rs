@@ -9,6 +9,7 @@ use rand::{Rng, rngs::StdRng};
 use super::fx::{self, Decals, FxAssets, FxRng};
 use crate::{
     config::SHOT_RANGE,
+    console::ConsoleCommand,
     net::{Fire, HitConfirm},
     physics::Layer,
     player::{GameInput, LocalPlayer, ViewRig},
@@ -184,9 +185,11 @@ pub fn reload(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     mut arsenal: ResMut<Arsenal>,
+    mut cmds: MessageReader<ConsoleCommand>,
     mut commands: Commands,
     sounds: Res<Sounds>,
 ) {
+    let asked = cmds.read().filter(|c| c.name == "reload").count() > 0;
     let kind = arsenal.current;
     let def = kind.def();
     if arsenal.reloading > 0.0 {
@@ -199,9 +202,9 @@ pub fn reload(
         return;
     }
     let empty = arsenal.ammo[kind.index()] == 0;
-    let wants =
-        keys.just_pressed(KeyCode::KeyR) || (empty && mouse.just_pressed(MouseButton::Left));
-    if input.enabled && wants && arsenal.ammo[kind.index()] < def.mag && arsenal.draw <= 0.0 {
+    let pressed = input.enabled
+        && (keys.just_pressed(KeyCode::KeyR) || (empty && mouse.just_pressed(MouseButton::Left)));
+    if (pressed || asked) && arsenal.ammo[kind.index()] < def.mag && arsenal.draw <= 0.0 {
         arsenal.reloading = def.reload_secs;
         arsenal.zoom = 0;
         arsenal.spray = 0.0;

@@ -347,7 +347,7 @@ pub fn on_connected(
 }
 
 pub fn print_feed(mut feed: MessageReader<Feed>, mut print: MessageWriter<Print>) {
-    for Feed(line) in feed.read() {
-        print.write(Print(line.clone()));
+    for line in feed.read() {
+        print.write(Print(line.text()));
     }
 }

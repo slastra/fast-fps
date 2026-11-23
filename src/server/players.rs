@@ -122,7 +122,7 @@ pub fn on_client_authorized(
     );
     feed.write(ToClients {
         targets: SendTargets::All,
-        message: Feed("a player joined".into()),
+        message: Feed::Note("a player joined".into()),
     });
 }
 
@@ -136,7 +136,7 @@ pub fn on_client_removed(
         if client.0 == ClientId::Client(remove.entity) {
             feed.write(ToClients {
                 targets: SendTargets::All,
-                message: Feed(format!("{} left", name.0)),
+                message: Feed::Note(format!("{} left", name.0)),
             });
             commands.entity(entity).despawn();
         }
@@ -174,7 +174,7 @@ pub fn receive_names(
         };
         feed.write(ToClients {
             targets: SendTargets::All,
-            message: Feed(line),
+            message: Feed::Note(line),
         });
         name.0 = new;
     }
@@ -267,7 +267,7 @@ pub fn receive_suicide(
         score.deaths += 1;
         feed.write(ToClients {
             targets: SendTargets::All,
-            message: Feed(format!("{} gave up", name.0)),
+            message: Feed::Note(format!("{} gave up", name.0)),
         });
         respawn(*client_id, &mut respawns);
     }

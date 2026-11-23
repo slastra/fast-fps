@@ -166,15 +166,20 @@ pub fn build(
         .map(|part| {
             let (mesh, rotation) = match part.shape {
                 Shape::Box(size) => (
-                    Cuboid::from_size(size).mesh().build(),
+                    lowpoly::block(size, part.color, 0.1, rng),
                     Quat::from_rotation_x(part.tilt),
                 ),
                 Shape::Cyl(radius, length) => (
-                    Cylinder::new(radius, length).mesh().resolution(7).build(),
+                    lowpoly::facet(
+                        Cylinder::new(radius, length).mesh().resolution(8).build(),
+                        part.color,
+                        0.1,
+                        rng,
+                    ),
                     Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
                 ),
             };
-            let mesh = Mesh3d(meshes.add(lowpoly::facet(mesh, part.color, 0.1, rng)));
+            let mesh = Mesh3d(meshes.add(mesh));
             (
                 mesh,
                 Transform::from_translation(part.at).with_rotation(rotation),

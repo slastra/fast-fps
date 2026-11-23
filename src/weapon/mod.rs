@@ -24,11 +24,13 @@ mod arsenal;
 mod defs;
 mod firing;
 pub mod fx;
+mod icons;
 mod models;
 mod view_model;
 
 pub use arsenal::{Arsenal, HideViewModel, HitMarker, ScriptedFire, Zoom};
 pub use defs::WeaponKind;
+pub use icons::{ICON_ASPECT, WeaponIcons};
 pub use view_model::{muzzle, spawn_avatar_guns, spawn_gun};
 
 use bevy::prelude::*;
@@ -51,7 +53,7 @@ const VM_SCALE: f32 = 0.45;
 const PUNCH_SCALE: f32 = 0.5;
 
 pub(super) fn plugin(app: &mut App) {
-    app.add_plugins(fx::plugin)
+    app.add_plugins((fx::plugin, icons::plugin))
         .init_resource::<Arsenal>()
         .init_resource::<HitMarker>()
         .init_resource::<ScriptedFire>()
@@ -76,5 +78,6 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Update, show_avatar_guns);
 
     app.console_command("weapon", "<ak|mp5|glock|shotgun|sniper>", "switch weapons")
-        .console_command("zoom", "<level>", "scope zoom level (sniper only)");
+        .console_command("zoom", "<level>", "scope zoom level (sniper only)")
+        .console_command("reload", "", "reload (also R)");
 }

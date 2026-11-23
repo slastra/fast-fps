@@ -1,20 +1,23 @@
-//! The arena layout: a walled courtyard at night with a ruined keep in the
-//! middle, raised corner platforms, crates, rocks and pines.
+//! The arena layout: a walled courtyard with a ruined keep in the middle,
+//! raised corner platforms, crates, rocks and pines.
 //!
-//! To change the map, edit [`spawn_level`] and the constants above it.
+//! To change the map, edit [`spawn_level`] and the constants above it. Things
+//! with collision are placed first, using the builder's layout `rng`. The
+//! decoration after them (grass, bushes, trim) uses `paint` and can be
+//! changed freely without moving anything players collide with.
 
 use std::f32::consts::{FRAC_PI_2, TAU};
 
 use avian3d::prelude::*;
-use bevy::{light::CascadeShadowConfigBuilder, prelude::*};
+use bevy::{light::NotShadowCaster, prelude::*};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use crate::{
     lowpoly,
     physics::Layer,
     world::{
-        builder::{Builder, STONE, STONE_DARK, WOOD},
-        lights::{campfire, lamp},
+        builder::{Builder, STONE, STONE_DARK, WOOD, WOOD_DARK},
+        lights::{campfire, fireflies, lamp},
     },
 };
 
@@ -50,8 +53,8 @@ pub fn spawn_level(
     // Every surface uses one material; color lives in the vertex colors.
     let material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
-        perceptual_roughness: 0.92,
-        reflectance: 0.2,
+        perceptual_roughness: 0.9,
+        reflectance: 0.25,
         ..default()
     });
     let lantern = materials.add(StandardMaterial {
@@ -65,13 +68,22 @@ pub fn spawn_level(
         unlit: true,
         ..default()
     });
+    let firefly = materials.add(StandardMaterial {
+        base_color: Color::srgb(0.8, 1.0, 0.4),
+        emissive: LinearRgba::rgb(9.0, 14.0, 2.5),
+        unlit: true,
+        ..default()
+    });
 
     let mut b = Builder {
         commands: &mut commands,
         meshes: &mut meshes,
         material,
         rng: StdRng::seed_from_u64(0xF0C5),
+        paint: StdRng::seed_from_u64(0xC0FFEE),
     };
+
+    // ---- Things you can collide with (layout) ------------------------------
 
     terrain(&mut b);
     perimeter(&mut b);
@@ -89,8 +101,8 @@ pub fn spawn_level(
         (Vec3::new(-9.0, 0.6, 19.0), 0.4),
         (Vec3::new(14.0, 0.6, -9.5), 2.1),
     ] {
-        let mesh = Cylinder::new(0.6, 4.0).mesh().resolution(7).build();
-        let mesh = lowpoly::facet(mesh, STONE, 0.1, &mut b.rng);
+        let mesh = Cylinder::new(0.6, 4.0).mesh().resolution(8).build();
+        let mesh = lowpoly::mossy(mesh, STONE, &mut b.paint);
         let rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_z(FRAC_PI_2);
         b.solid(
             mesh,
@@ -112,6 +124,17 @@ pub fn spawn_level(
     ] {
         b.crate_stack(at, count);
     }
+    for at in [
+        Vec3::new(7.2, 0.0, -17.2),
+        Vec3::new(6.4, 0.0, -17.9),
+        Vec3::new(-14.6, 0.0, 15.6),
+        Vec3::new(21.5, 0.0, 3.4),
+        Vec3::new(-17.6, 0.0, -11.8),
+        Vec3::new(-18.5, 0.0, -11.5),
+        Vec3::new(4.6, 0.0, -4.4),
+    ] {
+        b.barrel(at);
+    }
 
     // Rocks, kept clear of the keep and spawn points.
     let mut placed = 0;
@@ -123,7 +146,7 @@ pub fn spawn_level(
         );
         let near_spawn = SPAWNS.iter().any(|s| s.with_y(0.0).distance(at) < 4.0);
         let near_platform = at.x.abs() > 19.0 && at.z.abs() > 19.0;
-        if at.length() < 10.0 || near_spawn || near_platform || at.x > 26.0 {
+        if at.length() < 10.0 || near_spawn || near_platform || at.x > 26.0 || in_yard(at) {
             continue;
         }
         let size = Vec3::new(
@@ -135,9 +158,9 @@ pub fn spawn_level(
         placed += 1;
     }
 
-    // A few pines inside the walls, a forest outside them.
-    let mut placed = 0;
-    while placed < 9 {
+    // A few pines inside the walls.
+    let mut pines = Vec::new();
+    while pines.len() < 9 {
         let angle = b.rng.random_range(0.0..TAU);
         let radius = b.rng.random_range(24.0..32.0);
         let at = Vec3::new(angle.cos(), 0.0, angle.sin()) * radius;
@@ -148,15 +171,7 @@ pub fn spawn_level(
         }
         let height = b.rng.random_range(5.0..8.0);
         b.pine(at, height, true);
-        placed += 1;
-    }
-    for _ in 0..180 {
-        let angle = b.rng.random_range(0.0..TAU);
-        let radius = b.rng.random_range(42.0..88.0);
-        let (x, z) = (angle.cos() * radius, angle.sin() * radius);
-        let y = terrain_height(x, z) - 0.3;
-        let height = b.rng.random_range(6.0..12.0);
-        b.pine(Vec3::new(x, y, z), height, false);
+        pines.push(at);
     }
 
     // Lamps.
@@ -179,23 +194,66 @@ pub fn spawn_level(
 
     campfire(&mut b, Vec3::new(2.8, 0.0, 0.0), flame);
 
-    // Moonlight.
-    b.commands.spawn((
-        DirectionalLight {
-            color: Color::srgb(0.55, 0.62, 1.0),
-            illuminance: 9.0,
-            shadow_maps_enabled: true,
-            contact_shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 1.0, 0.0).looking_at(Vec3::new(-0.6, -1.0, 0.45), Vec3::Y),
-        CascadeShadowConfigBuilder {
-            maximum_distance: 90.0,
-            first_cascade_far_bound: 14.0,
-            ..default()
+    // ---- Decoration (no collision; uses `paint` only) ----------------------
+
+    // The forest outside the walls.
+    for _ in 0..200 {
+        let angle = b.paint.random_range(0.0..TAU);
+        let radius = b.paint.random_range(42.0..90.0);
+        let (x, z) = (angle.cos() * radius, angle.sin() * radius);
+        let y = terrain_height(x, z) - 0.3;
+        let height = b.paint.random_range(6.0..13.0);
+        b.pine(Vec3::new(x, y, z), height, false);
+    }
+
+    ground_cover(&mut b);
+
+    // Bushes along the inside of the walls and under the pines.
+    let mut spots = Vec::new();
+    while spots.len() < 34 {
+        let along = b.paint.random_range(-34.0..34.0);
+        let depth = b.paint.random_range(32.2..35.0);
+        let at = match b.paint.random_range(0..4) {
+            0 => Vec3::new(along, 0.0, -depth),
+            1 => Vec3::new(along, 0.0, depth),
+            2 => Vec3::new(-depth, 0.0, along),
+            _ => Vec3::new(depth, 0.0, along),
+        };
+        // Not along the east wall, where they would hide the practice dummies.
+        if at.x > 26.0 || SPAWNS.iter().any(|s| s.with_y(0.0).distance(at) < 3.0) {
+            continue;
         }
-        .build(),
-    ));
+        let size = b.paint.random_range(0.6..1.2);
+        b.bush(at, size);
+        spots.push(at);
+    }
+    for pine in &pines {
+        let offset = Vec3::new(
+            b.paint.random_range(-1.6..1.6),
+            0.0,
+            b.paint.random_range(-1.6..1.6),
+        );
+        let size = b.paint.random_range(0.5..0.9);
+        b.bush(*pine + offset, size);
+    }
+
+    // Fireflies hang around the pines and bushes.
+    let homes: Vec<Vec3> = pines
+        .iter()
+        .chain(spots.iter().step_by(2))
+        .enumerate()
+        .map(|(i, at)| {
+            let height = 0.7 + (i % 4) as f32 * 0.45;
+            Vec3::new(at.x * 0.93, height, at.z * 0.93)
+        })
+        .collect();
+    fireflies(&mut b, firefly, &homes);
+}
+
+/// The open yard south of the keep. Nothing is placed here: it keeps the
+/// approach to the south door clear, and the test scenarios use it as a stage.
+fn in_yard(at: Vec3) -> bool {
+    at.x.abs() < 8.0 && at.z > 7.0 && at.z < 22.0
 }
 
 fn terrain_height(x: f32, z: f32) -> f32 {
@@ -206,16 +264,39 @@ fn terrain_height(x: f32, z: f32) -> f32 {
     ramp * (18.0 + n * 5.0) + n * 0.9 * t.sqrt()
 }
 
+/// How much of a spot on the ground is worn to dirt, 0 to 1: a track around
+/// the keep and paths out from its doors.
+fn dirt(x: f32, z: f32) -> f32 {
+    let wobble = lowpoly::noise2(x * 0.35, z * 0.35, 3) * 0.9;
+    let ring = x.abs().max(z.abs());
+    let track = 1.0 - ((ring - 8.1 + wobble).abs() / 1.3).clamp(0.0, 1.0);
+    let cross = x.abs().min(z.abs());
+    let inside = if ring < ARENA - 1.0 && ring > 6.5 {
+        1.0
+    } else {
+        0.0
+    };
+    let path = (1.0 - ((cross + wobble * 0.6) / 1.5).clamp(0.0, 1.0)) * inside;
+    track.max(path)
+}
+
 fn terrain(b: &mut Builder) {
-    let raw = lowpoly::grid(200.0, 80, terrain_height);
-    let grass = Color::srgb(0.11, 0.17, 0.10);
-    let moss = Color::srgb(0.16, 0.2, 0.12);
-    let rock = Color::srgb(0.22, 0.22, 0.25);
-    let mesh = lowpoly::facet_with(raw, &mut b.rng, |c, rng| {
-        let t = (c.y / 14.0).clamp(0.0, 1.0);
-        let base = if rng.random_bool(0.3) { moss } else { grass };
-        let mixed = base.mix(&rock, t);
-        lowpoly::shade(mixed, 0.16, rng)
+    let raw = lowpoly::grid(200.0, 128, terrain_height);
+    let grass_dark = Color::srgb(0.09, 0.17, 0.09);
+    let grass_light = Color::srgb(0.16, 0.26, 0.11);
+    let earth = Color::srgb(0.23, 0.17, 0.11);
+    let flagstone = Color::srgb(0.24, 0.24, 0.27);
+    let cliff = Color::srgb(0.24, 0.24, 0.28);
+    let mesh = lowpoly::facet_with(raw, &mut b.paint, |c, _, rng| {
+        // Inside the keep the floor is stone.
+        if c.x.abs() < 5.6 && c.z.abs() < 5.6 {
+            return lowpoly::shade(flagstone, 0.13, rng);
+        }
+        let patch = lowpoly::noise2(c.x * 0.16, c.z * 0.16, 11) * 0.5 + 0.5;
+        let grass = grass_dark.mix(&grass_light, patch);
+        let ground = grass.mix(&earth, dirt(c.x, c.z));
+        let height = (c.y / 14.0).clamp(0.0, 1.0);
+        lowpoly::shade(ground.mix(&cliff, height), 0.13, rng)
     });
     b.mesh(mesh, Transform::default());
     // The playable floor is flat, so a slab is all physics needs.
@@ -225,6 +306,47 @@ fn terrain(b: &mut Builder) {
         CollisionLayers::new(Layer::World, LayerMask::ALL),
         Transform::from_xyz(0.0, -0.5, 0.0),
     ));
+}
+
+/// Grass tufts and pebbles, merged into a few big meshes.
+fn ground_cover(b: &mut Builder) {
+    let open = |x: f32, z: f32| {
+        let in_keep = x.abs() < 6.6 && z.abs() < 6.6;
+        let on_platform = x.abs() > 20.3 && z.abs() > 20.3 && x.abs() < 27.7 && z.abs() < 27.7;
+        !in_keep && !on_platform && dirt(x, z) < 0.35
+    };
+    // One mesh per quarter of the arena, so off-screen grass is skipped.
+    for (sx, sz) in [(1.0, 1.0), (-1.0, 1.0), (1.0, -1.0), (-1.0, -1.0)] {
+        let mut spots = Vec::new();
+        while spots.len() < 520 {
+            let x = b.paint.random_range(0.0..ARENA - 0.3) * sx;
+            let z = b.paint.random_range(0.0..ARENA - 0.3) * sz;
+            // Thicker in patches.
+            let patch = lowpoly::noise2(x * 0.2, z * 0.2, 5) * 0.5 + 0.5;
+            if open(x, z) && b.paint.random::<f32>() < 0.25 + patch {
+                spots.push(Vec2::new(x, z));
+            }
+        }
+        let mesh = lowpoly::grass(&spots, &mut b.paint);
+        b.mesh(mesh, Transform::default()).insert(NotShadowCaster);
+    }
+
+    let mut pebbles = Vec::new();
+    while pebbles.len() < 150 {
+        let x = b.paint.random_range(-ARENA + 1.0..ARENA - 1.0);
+        let z = b.paint.random_range(-ARENA + 1.0..ARENA - 1.0);
+        if x.abs() < 6.6 && z.abs() < 6.6 {
+            continue;
+        }
+        let size = b.paint.random_range(0.05..0.16);
+        let seed = b.paint.random::<u32>();
+        let shape = Vec3::new(size, size * 0.6, size * b.paint.random_range(0.7..1.4));
+        let stone = lowpoly::rock(shape, seed).translated_by(Vec3::new(x, size * 0.2, z));
+        let color = Color::srgb(0.3, 0.3, 0.32);
+        pebbles.push(lowpoly::facet(stone, color, 0.2, &mut b.paint));
+    }
+    let mesh = lowpoly::merge(pebbles);
+    b.mesh(mesh, Transform::default()).insert(NotShadowCaster);
 }
 
 fn perimeter(b: &mut Builder) {
@@ -237,25 +359,53 @@ fn perimeter(b: &mut Builder) {
         for i in 0..segments {
             let along = -span / 2.0 + seg * (i as f32 + 0.5);
             let height = b.rng.random_range(3.0..4.3);
-            let (center, size) = if side < 2 {
-                let z = if side == 0 { -edge } else { edge };
-                (
-                    Vec3::new(along, height / 2.0, z),
-                    Vec3::new(seg + 0.02, height, thickness),
-                )
-            } else {
-                let x = if side == 2 { -edge } else { edge };
-                (
-                    Vec3::new(x, height / 2.0, along),
-                    Vec3::new(thickness, height, seg + 0.02),
-                )
+            // Walls 0 and 1 run along x; 2 and 3 along z.
+            let place = |a: f32, y: f32, across: f32| {
+                let offset = edge + across;
+                match side {
+                    0 => Vec3::new(a, y, -offset),
+                    1 => Vec3::new(a, y, offset),
+                    2 => Vec3::new(-offset, y, a),
+                    _ => Vec3::new(offset, y, a),
+                }
             };
-            let color = if b.rng.random_bool(0.3) {
+            let dims = |length: f32, h: f32, depth: f32| {
+                if side < 2 {
+                    Vec3::new(length, h, depth)
+                } else {
+                    Vec3::new(depth, h, length)
+                }
+            };
+            let color = if b.paint.random_bool(0.3) {
                 STONE_DARK
             } else {
                 STONE
             };
-            b.block(center, size, Quat::IDENTITY, color, 0.06);
+            b.block(
+                place(along, height / 2.0, 0.0),
+                dims(seg + 0.02, height, thickness),
+                Quat::IDENTITY,
+                color,
+                0.06,
+            );
+            // A wider footing, a capping course, and battlements on top.
+            b.trim(
+                place(along, 0.3, 0.0),
+                dims(seg + 0.02, 0.6, thickness + 0.3),
+                STONE_DARK,
+            );
+            b.trim(
+                place(along, height - 0.1, 0.0),
+                dims(seg + 0.02, 0.2, thickness + 0.16),
+                STONE_DARK,
+            );
+            for m in [-0.25, 0.25] {
+                b.trim(
+                    place(along + seg * m, height + 0.28, 0.0),
+                    dims(seg * 0.3, 0.56, thickness),
+                    color,
+                );
+            }
         }
     }
 }
@@ -268,12 +418,12 @@ fn keep(b: &mut Builder) {
     for z in [-6.0, 6.0] {
         for x in [-1.0, 1.0] {
             let len = 6.0 + t / 2.0 - door;
-            b.block(
-                Vec3::new(x * (door + len / 2.0), h / 2.0, z),
-                Vec3::new(len, h, t),
-                Quat::IDENTITY,
-                STONE,
-                0.06,
+            let center = Vec3::new(x * (door + len / 2.0), h / 2.0, z);
+            b.block(center, Vec3::new(len, h, t), Quat::IDENTITY, STONE, 0.06);
+            b.trim(
+                center.with_y(0.25),
+                Vec3::new(len, 0.5, t + 0.22),
+                STONE_DARK,
             );
         }
         b.block(
@@ -283,16 +433,24 @@ fn keep(b: &mut Builder) {
             STONE_DARK,
             0.06,
         );
+        // Stone jambs either side of the doorway.
+        for x in [-1.0, 1.0] {
+            b.trim(
+                Vec3::new(x * (door + 0.16), (h - 0.9) / 2.0, z),
+                Vec3::new(0.32, h - 0.9, t + 0.14),
+                STONE_DARK,
+            );
+        }
     }
     // East wall with a doorway.
     for z in [-1.0, 1.0] {
         let len = 6.0 - t / 2.0 - door;
-        b.block(
-            Vec3::new(6.0, h / 2.0, z * (door + len / 2.0)),
-            Vec3::new(t, h, len),
-            Quat::IDENTITY,
-            STONE,
-            0.06,
+        let center = Vec3::new(6.0, h / 2.0, z * (door + len / 2.0));
+        b.block(center, Vec3::new(t, h, len), Quat::IDENTITY, STONE, 0.06);
+        b.trim(
+            center.with_y(0.25),
+            Vec3::new(t + 0.22, 0.5, len),
+            STONE_DARK,
         );
     }
     b.block(
@@ -310,7 +468,22 @@ fn keep(b: &mut Builder) {
         STONE,
         0.06,
     );
-    // Half roof over the west side, with a parapet and a ramp up.
+    b.trim(
+        Vec3::new(-6.0, 0.25, 0.0),
+        Vec3::new(t + 0.22, 0.5, 12.0 - t),
+        STONE_DARK,
+    );
+    // Heavier stones at the four corners.
+    for x in [-6.0, 6.0] {
+        for z in [-6.0, 6.0] {
+            b.trim(
+                Vec3::new(x, (h + 0.5) / 2.0, z),
+                Vec3::new(t + 0.3, h + 0.5, t + 0.3),
+                STONE_DARK,
+            );
+        }
+    }
+    // Half roof over the west side, on beams, with a parapet and a ramp up.
     b.block(
         Vec3::new(-3.2, h + 0.2, 0.0),
         Vec3::new(6.4 + 0.4, 0.4, 12.8),
@@ -318,6 +491,14 @@ fn keep(b: &mut Builder) {
         WOOD,
         0.12,
     );
+    for i in 0..5 {
+        let z = -4.8 + i as f32 * 2.4;
+        b.trim(
+            Vec3::new(-3.0, h - 0.14, z),
+            Vec3::new(5.6, 0.28, 0.3),
+            WOOD_DARK,
+        );
+    }
     b.block(
         Vec3::new(-0.2, h + 0.4 + 0.35, 0.0),
         Vec3::new(0.4, 0.7, 12.8),
@@ -330,6 +511,19 @@ fn keep(b: &mut Builder) {
         Vec3::new(-6.4, h + 0.4, 0.0),
         3.0,
     );
+    // Banners beside the south and east doors.
+    let cloth = Color::srgb(0.5, 0.07, 0.08);
+    let gold = Color::srgb(0.75, 0.55, 0.16);
+    for x in [-2.6, 2.6] {
+        b.trim(Vec3::new(x, 2.7, 6.46), Vec3::new(0.8, 2.3, 0.05), cloth);
+        b.trim(Vec3::new(x, 3.6, 6.5), Vec3::new(0.8, 0.14, 0.05), gold);
+        b.trim(Vec3::new(x, 3.92, 6.5), Vec3::new(1.0, 0.1, 0.1), WOOD_DARK);
+    }
+    for z in [-2.6, 2.6] {
+        b.trim(Vec3::new(6.46, 2.7, z), Vec3::new(0.05, 2.3, 0.8), cloth);
+        b.trim(Vec3::new(6.5, 3.6, z), Vec3::new(0.05, 0.14, 0.8), gold);
+        b.trim(Vec3::new(6.5, 3.92, z), Vec3::new(0.1, 0.1, 1.0), WOOD_DARK);
+    }
 }
 
 fn platforms(b: &mut Builder) {
@@ -342,6 +536,13 @@ fn platforms(b: &mut Builder) {
             Quat::IDENTITY,
             STONE,
             0.06,
+        );
+        // A footing and a lip around the top.
+        b.trim(center.with_y(0.3), Vec3::new(7.3, 0.6, 7.3), STONE_DARK);
+        b.trim(
+            center.with_y(height - 0.13),
+            Vec3::new(7.2, 0.24, 7.2),
+            STONE_DARK,
         );
         // Ramp runs along x toward the middle of the arena.
         b.ramp(

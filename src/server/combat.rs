@@ -125,10 +125,14 @@ pub fn receive_fire(
                         }
                         let killer = names.get(shooter).map(|n| n.0.as_str()).unwrap_or("?");
                         let victim = names.get(hit.entity).map(|n| n.0.as_str()).unwrap_or("?");
-                        let how = if head { " (headshot)" } else { "" };
                         feed.write(ToClients {
                             targets: SendTargets::All,
-                            message: Feed(format!("{killer} [{}] {victim}{how}", def.name)),
+                            message: Feed::Kill {
+                                killer: killer.to_string(),
+                                victim: victim.to_string(),
+                                weapon: message.weapon,
+                                headshot: head,
+                            },
                         });
                         if let Ok((_, victim_client)) = clients.get(hit.entity) {
                             respawn(victim_client.0, &mut respawns);

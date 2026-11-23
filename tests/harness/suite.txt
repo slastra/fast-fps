@@ -8,3 +8,5 @@ tests/harness/artifacts.cfg
 tests/harness/lan_host.cfg tests/harness/lan_client.cfg
 -c target/harness/settings tests/harness/settings_save.cfg
 -c target/harness/settings tests/harness/settings_load.cfg
+-s 1600x900 tests/harness/hud.cfg
+-s 1600x900 tests/harness/look.cfg

@@ -1,9 +1,10 @@
-//! The crosshair, whose gap shows your real accuracy, and the scope overlay.
+//! The crosshair, whose gap shows your real accuracy, the reload bar under
+//! it, and the scope overlay.
 
 use bevy::prelude::*;
 
 use crate::{
-    hud::{CrossBar, CrosshairRoot, ScopeOverlay, TEXT},
+    hud::{ACCENT, CrossBar, CrosshairRoot, DANGER, ReloadFill, ReloadTrack, ScopeOverlay, TEXT},
     render::WorldCamera,
     weapon::{Arsenal, HitMarker},
 };
@@ -15,6 +16,7 @@ pub fn crosshair(
     mut marker: ResMut<HitMarker>,
     arsenal: Res<Arsenal>,
     window: Single<&Window>,
+    scale: Res<UiScale>,
     camera: Single<&Projection, With<WorldCamera>>,
     mut root: Single<&mut Visibility, With<CrosshairRoot>>,
     mut bars: Query<(&CrossBar, &mut Node, &mut BackgroundColor)>,
@@ -29,16 +31,17 @@ pub fn crosshair(
         Projection::Perspective(p) => p.fov,
         _ => 1.4,
     };
+    // In window pixels, then into the HUD's scaled units.
     let half_height = window.height() / 2.0;
     let cone = arsenal.inaccuracy.to_radians().tan() / (fov / 2.0).tan() * half_height;
-    let gap = cone.max(3.0);
+    let gap = (cone / scale.0).max(3.0);
 
     let hit = marker.time > 0.0;
     let color = match (hit, marker.kill) {
-        (true, true) => Color::srgb(1.0, 0.25, 0.15),
+        (true, true) => DANGER,
         (true, false) => Color::WHITE,
         _ if arsenal.reloading > 0.0 || arsenal.draw > 0.0 => TEXT.with_alpha(0.35),
-        _ => TEXT.with_alpha(0.9),
+        _ => TEXT.with_alpha(0.92),
     };
     for (bar, mut node, mut bg) in &mut bars {
         let (len, thick) = (8.0, 2.0);
@@ -55,6 +58,25 @@ pub fn crosshair(
             ..default()
         };
         bg.0 = color;
+    }
+}
+
+/// A thin bar under the crosshair that fills while you reload.
+pub fn reload_bar(
+    arsenal: Res<Arsenal>,
+    mut track: Single<&mut Visibility, With<ReloadTrack>>,
+    mut fill: Single<(&mut Node, &mut BackgroundColor), With<ReloadFill>>,
+) {
+    let reloading = arsenal.reloading > 0.0;
+    track.set_if_neq(if reloading {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    });
+    if reloading {
+        let done = 1.0 - arsenal.reloading / arsenal.def().reload_secs;
+        fill.0.width = percent(done.clamp(0.0, 1.0) * 100.0);
+        fill.1.0 = ACCENT;
     }
 }
 

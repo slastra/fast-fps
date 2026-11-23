@@ -301,12 +301,7 @@ pub fn spawn(
                     Paint::Dark => Color::srgb(0.09, 0.09, 0.11),
                     Paint::Boot | Paint::Glow => Color::srgb(0.04, 0.04, 0.05),
                 };
-                let mesh = lowpoly::facet(
-                    Cuboid::from_size(size).mesh().build(),
-                    color,
-                    0.08,
-                    &mut rng,
-                );
+                let mesh = lowpoly::block(size, color, 0.08, &mut rng);
                 (meshes.add(mesh), material.clone())
             };
             let mut part = commands.spawn((

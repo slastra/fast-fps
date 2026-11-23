@@ -18,7 +18,10 @@ Launch arguments are console commands with a `+`: `cargo run -- +name alice +hos
 | `name <name>` | Set your player name. Saved. |
 | `sens <value>` | Mouse sensitivity (default 0.07). Saved. |
 | `fov <degrees>` | Field of view (default 80). Saved. |
+| `sky [night\|dusk\|dawn\|day\|next]` | Time of day (default dusk). Saved. |
 | `weapon <ak\|mp5\|glock\|shotgun\|sniper>` | Switch weapons (also keys 1-5, the wheel, and Q). |
+| `reload` | Reload (also R). |
+| `scoreboard <0\|1>` | Keep the scoreboard up (holding Tab also shows it). |
 | `zoom <level>` | Sniper scope level; 0 is unscoped (also right click). |
 | `kill` | Respawn somewhere else. |
 | `quit` | Exit. |
