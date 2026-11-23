@@ -5,9 +5,11 @@
 //! - [`switches`]: `r_*` switches for each render feature.
 //! - [`probe`]: `state`, `assert` and `wait_until`, which let a script check
 //!   what the game is actually doing.
+//! - [`perf`]: `perf_reset`, `perf` and `vid_fullscreen`, for measuring speed.
 //!
 //! See `docs/harness.md`, `scripts/harness.sh` and `tests/harness/*.cfg`.
 
+mod perf;
 pub mod probe;
 mod switches;
 
@@ -33,7 +35,7 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<PendingLook>()
         .add_systems(Update, scene_commands)
         .add_systems(PreUpdate, spin)
-        .add_plugins((switches::plugin, probe::plugin));
+        .add_plugins((switches::plugin, probe::plugin, perf::plugin));
 
     app.console_command(
         "screenshot",
