@@ -17,6 +17,11 @@
 //! which uses GPU timestamp queries. It is only added when the game is started
 //! with `HARNESS` or `GPU_TIMINGS` set, because the queries cost a little.
 //! Without it, `perf` reports frame times only.
+//!
+//! `PERF_LOG=<file>` writes one line per second of play to that file: frame
+//! times, GPU and CPU time, where the camera was, and whether the window was
+//! focused or the console open. It is for finding out what a slow moment in
+//! normal play was, without typing anything during it.
 
 use bevy::{
     diagnostic::DiagnosticsStore,
@@ -45,11 +50,27 @@ pub(super) fn plugin(app: &mut App) {
             avian3d::prelude::PhysicsDiagnosticsPlugin,
         ));
     }
+    if let Some(path) = std::env::var_os("PERF_LOG") {
+        match std::fs::File::create(&path) {
+            Ok(file) => {
+                app.insert_resource(PerfLog {
+                    file,
+                    started: std::time::Instant::now(),
+                    second: FrameWindow::default(),
+                    since: 0.0,
+                });
+            }
+            Err(e) => warn!("PERF_LOG: can't create {}: {e}", path.display()),
+        }
+    }
     app.init_resource::<FrameWindow>()
         .init_resource::<UpdateStart>()
         .init_resource::<Seen>()
         .add_systems(First, start_update)
-        .add_systems(Last, record_frame)
+        .add_systems(
+            Last,
+            (record_frame, write_log.run_if(resource_exists::<PerfLog>)).chain(),
+        )
         .add_systems(Update, perf_commands);
 
     app.console_command("perf_reset", "", "start a new performance measurement")
@@ -89,6 +110,33 @@ struct FrameWindow {
 /// measurements newer than the last one counted are new data.
 #[derive(Resource, Default)]
 struct Seen(std::collections::HashMap<String, std::time::Instant>);
+
+/// The `PERF_LOG` file and the second being measured for it.
+#[derive(Resource)]
+struct PerfLog {
+    file: std::fs::File,
+    started: std::time::Instant,
+    second: FrameWindow,
+    /// Seconds of real time in `second` so far.
+    since: f32,
+}
+
+impl FrameWindow {
+    /// Add one frame: its time, its update's CPU time, and fresh GPU samples.
+    fn push(&mut self, ms: f32, update: Option<f32>, samples: &[(String, f64)]) {
+        self.frames.push(ms);
+        self.updates.extend(update);
+        for (pass, value) in samples {
+            match self.gpu.iter_mut().find(|(name, ..)| name == pass) {
+                Some(entry) => {
+                    entry.1 += value;
+                    entry.2 += 1;
+                }
+                None => self.gpu.push((pass.clone(), *value, 1)),
+            }
+        }
+    }
+}
 
 impl FrameWindow {
     fn summary(&self) -> Option<Summary> {
@@ -149,16 +197,15 @@ fn record_frame(
     diagnostics: Option<Res<DiagnosticsStore>>,
     mut seen: ResMut<Seen>,
     mut window: ResMut<FrameWindow>,
+    mut log: Option<ResMut<PerfLog>>,
     mut probe: ResMut<Probe>,
 ) {
     let ms = time.delta_secs() * 1000.0;
     if ms <= 0.0 {
         return;
     }
-    window.frames.push(ms);
-    if let Some(start) = start.0 {
-        window.updates.push(start.elapsed().as_secs_f32() * 1000.0);
-    }
+    let update = start.0.map(|start| start.elapsed().as_secs_f32() * 1000.0);
+    let mut samples = Vec::new();
     if let Some(diagnostics) = diagnostics {
         for diagnostic in diagnostics.iter() {
             let path = diagnostic.path().as_str();
@@ -178,16 +225,13 @@ fn record_frame(
                 continue;
             }
             seen.0.insert(pass.clone(), measurement.time);
-            let value = measurement.value;
-            let pass = pass.as_str();
-            match window.gpu.iter_mut().find(|(name, ..)| name == pass) {
-                Some(entry) => {
-                    entry.1 += value;
-                    entry.2 += 1;
-                }
-                None => window.gpu.push((pass.to_string(), value, 1)),
-            }
+            samples.push((pass, measurement.value));
         }
+    }
+    window.push(ms, update, &samples);
+    if let Some(log) = log.as_mut() {
+        log.second.push(ms, update, &samples);
+        log.since += ms / 1000.0;
     }
     if let Some(summary) = window.summary() {
         probe.set("frame_ms", format!("{:.2}", summary.avg));
@@ -199,6 +243,50 @@ fn record_frame(
             probe.set("cpu_ms", format!("{avg:.2}"));
         }
     }
+}
+
+/// Each second, write that second's numbers to the `PERF_LOG` file.
+fn write_log(
+    mut log: ResMut<PerfLog>,
+    console: Res<crate::console::Console>,
+    camera: Query<&GlobalTransform, With<crate::render::WorldCamera>>,
+    screen: Single<&Window>,
+) {
+    use std::io::Write;
+    if log.since < 1.0 {
+        return;
+    }
+    let Some(s) = log.second.summary() else {
+        return;
+    };
+    let gpu = s.gpu.map_or("-".to_string(), |g| format!("{g:.2}"));
+    let (cpu, cpu_p99) = s.update.unwrap_or((0.0, 0.0));
+    let at = camera.iter().next().map_or("-".to_string(), |t| {
+        let p = t.translation();
+        format!("{:.0} {:.1} {:.0}", p.x, p.y, p.z)
+    });
+    let mut flags = Vec::new();
+    if !screen.focused {
+        flags.push("unfocused");
+    }
+    if console.open {
+        flags.push("console");
+    }
+    let line = format!(
+        "{:7.1}s  {:4.0} fps  avg {:5.2}  p99 {:6.2}  worst {:6.1}  gpu {gpu:>5}  cpu {cpu:5.2} ({cpu_p99:5.2})  {}x{} {:?}  at {at}  {}\n",
+        log.started.elapsed().as_secs_f32(),
+        1000.0 / s.avg,
+        s.avg,
+        s.p99,
+        s.worst,
+        screen.physical_width(),
+        screen.physical_height(),
+        screen.mode,
+        flags.join(" "),
+    );
+    let _ = log.file.write_all(line.as_bytes());
+    log.second = FrameWindow::default();
+    log.since = 0.0;
 }
 
 fn perf_commands(

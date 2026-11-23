@@ -35,6 +35,20 @@ Results are saved in `target/bench/`.
 In the game, `perf_reset` starts a measurement and `perf` prints the same numbers for one
 spot. GPU timing is on under the harness, or when the game starts with `GPU_TIMINGS=1`.
 
+**To find out what a slow moment in real play was,** start the game with `PERF_LOG` set and
+play normally:
+
+```sh
+GPU_TIMINGS=1 PERF_LOG=perf-log.txt cargo run --release
+```
+
+It writes one line per second: fps, average, p99 and worst frame time, GPU and CPU time,
+window size, where the camera was, and whether the window was unfocused or the console open.
+
+The HUD's FPS is the average over the last 120 frames. Bevy's own smoothed FPS barely smooths
+at high frame rates (its smoothing factor is in seconds, about 16 ms), so one slow frame made
+the readout drop to that frame's rate, and a game running at 150 fps could show 70.
+
 **Read GPU and CPU times, not fps, from invisible runs.** The invisible display paces frames
 on its own schedule, so the same build can show 100 fps one run and 140 the next. GPU and CPU
 times barely move between runs.
@@ -97,6 +111,15 @@ p99 frame time 6.9-8.1 ms on every view. The target was 120 fps with p99 under 8
 run, against 6.9-8.1 ms in release. Raising the dev opt-level to 3 made no measurable
 difference to update time and slowed rebuilds by about 10%, so it stays at 1. To judge speed,
 use a release build.
+
+## Real play on the desktop
+
+30 seconds of play at 4K on `medium`, logged with `PERF_LOG`, on Wayland and then XWayland:
+both averaged 120 fps, GPU about 3 ms, and nearly every second had a frame of about 16 ms.
+The game's own CPU time was 3-7 ms (p99 about 9 ms), against about 2 ms on the bench route,
+even while standing still. XWayland made no difference, so it isn't Bevy's Wayland frame
+pacing issue ([#21833](https://github.com/bevyengine/bevy/issues/21833)). Not yet profiled:
+the next step is a CPU trace of real play.
 
 ## Not measured yet
 

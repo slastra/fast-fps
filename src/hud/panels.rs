@@ -171,10 +171,14 @@ pub fn status(
         return;
     }
     *timer = 0.25;
+    // Frames over the average frame time of the last 120. Bevy's smoothed FPS
+    // is barely smoothed at high frame rates (its factor is in seconds, about
+    // 16 ms), so one slow frame dragged the readout down to that frame's rate.
     let fps = diagnostics
-        .get(&FrameTimeDiagnosticsPlugin::FPS)
-        .and_then(|d| d.smoothed())
-        .unwrap_or(0.0);
+        .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
+        .and_then(|d| d.average())
+        .filter(|ms| *ms > 0.0)
+        .map_or(0.0, |ms| 1000.0 / ms);
     let count = players.iter().count();
     let mode = if server.is_some() {
         format!("HOSTING  ·  {count} PLAYERS")
