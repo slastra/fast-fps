@@ -14,11 +14,9 @@ mod ragdoll;
 pub mod rig;
 
 use bevy::prelude::*;
+use bevy_replicon::prelude::*;
 
-use crate::{
-    net::{Damaged, Loadout, LocalId, Player, ShotFx},
-    player::smooth_remote,
-};
+use crate::net::{Damaged, Dummy, Loadout, LocalId, Player, Pose, ShotFx};
 use anim::AvatarAnim;
 use rig::AvatarRig;
 
@@ -27,9 +25,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(dress_player)
         .add_systems(
             Update,
-            (shots, damaged, anim::advance, anim::apply)
-                .chain()
-                .after(smooth_remote),
+            (smooth_remote, shots, damaged, anim::advance, anim::apply).chain(),
         )
         .add_systems(Update, ragdoll::age);
 }
@@ -111,6 +107,24 @@ fn damaged(
             anim.death_pos = hit.pos;
             anim.flinch = Vec2::ZERO;
             anim.flinch_vel = Vec2::ZERO;
+        }
+    }
+}
+
+/// Replicated poses arrive at the server tick rate; ease toward them.
+pub fn smooth_remote(
+    time: Res<Time>,
+    mut remotes: Query<(&Pose, &mut Transform), (With<Remote>, Or<(With<Player>, With<Dummy>)>)>,
+) {
+    let dt = time.delta_secs();
+    for (pose, mut transform) in &mut remotes {
+        let target_rot = Quat::from_rotation_y(pose.yaw);
+        if transform.translation.distance(pose.pos) > 4.0 {
+            transform.translation = pose.pos;
+            transform.rotation = target_rot;
+        } else {
+            transform.translation.smooth_nudge(&pose.pos, 18.0, dt);
+            transform.rotation.smooth_nudge(&target_rot, 18.0, dt);
         }
     }
 }

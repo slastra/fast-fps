@@ -1,8 +1,7 @@
-//! The arena: a walled courtyard at night with a ruined keep in the middle,
-//! raised corner platforms, crates, rocks and pines, lit by lamps and a fire.
+//! The arena layout: a walled courtyard at night with a ruined keep in the
+//! middle, raised corner platforms, crates, rocks and pines.
 //!
-//! Everything is generated from a fixed seed so every peer builds the exact
-//! same colliders, which keeps server-side hit scans honest.
+//! To change the map, edit [`spawn_level`] and the constants above it.
 
 use std::f32::consts::{FRAC_PI_2, TAU};
 
@@ -10,7 +9,14 @@ use avian3d::prelude::*;
 use bevy::{light::CascadeShadowConfigBuilder, prelude::*};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use crate::{Layer, lowpoly};
+use crate::{
+    lowpoly,
+    physics::Layer,
+    world::{
+        builder::{Builder, STONE, STONE_DARK, WOOD},
+        lights::{campfire, lamp},
+    },
+};
 
 /// Half the width of the playable square.
 pub const ARENA: f32 = 36.0;
@@ -36,155 +42,7 @@ pub const DUMMIES: [(Vec3, f32); 5] = [
     (Vec3::new(30.0, 0.95, 10.0), 0.0),
 ];
 
-const STONE: Color = Color::srgb(0.33, 0.33, 0.37);
-const STONE_DARK: Color = Color::srgb(0.24, 0.24, 0.28);
-const WOOD: Color = Color::srgb(0.42, 0.26, 0.14);
-const CRATE: Color = Color::srgb(0.55, 0.37, 0.19);
-const IRON: Color = Color::srgb(0.08, 0.08, 0.09);
-const ROCK: Color = Color::srgb(0.29, 0.29, 0.31);
-
-pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Startup, spawn_level)
-        .add_systems(Update, flicker);
-}
-
-/// A light that wobbles like fire.
-#[derive(Component)]
-struct Flicker {
-    base: f32,
-    seed: f32,
-}
-
-/// Flame meshes that wobble along with the light.
-#[derive(Component)]
-struct FlameMesh(f32);
-
-struct Builder<'a, 'w, 's> {
-    commands: &'a mut Commands<'w, 's>,
-    meshes: &'a mut Assets<Mesh>,
-    material: Handle<StandardMaterial>,
-    rng: StdRng,
-}
-
-impl Builder<'_, '_, '_> {
-    fn mesh(&mut self, mesh: Mesh, transform: Transform) -> EntityCommands<'_> {
-        let handle = self.meshes.add(mesh);
-        self.commands.spawn((
-            Mesh3d(handle),
-            MeshMaterial3d(self.material.clone()),
-            transform,
-        ))
-    }
-
-    fn solid(&mut self, mesh: Mesh, transform: Transform, collider: Collider) {
-        self.mesh(mesh, transform).insert((
-            RigidBody::Static,
-            collider,
-            CollisionLayers::new(Layer::World, LayerMask::ALL),
-        ));
-    }
-
-    /// An axis-aligned (optionally rotated) box with a matching collider.
-    fn block(&mut self, center: Vec3, size: Vec3, rotation: Quat, color: Color, jitter: f32) {
-        let mesh = lowpoly::facet(
-            Cuboid::from_size(size).mesh().build(),
-            color,
-            jitter,
-            &mut self.rng,
-        );
-        self.solid(
-            mesh,
-            Transform::from_translation(center).with_rotation(rotation),
-            Collider::cuboid(size.x, size.y, size.z),
-        );
-    }
-
-    /// A ramp whose top surface runs from `low` to `high` (both on the surface).
-    fn ramp(&mut self, low: Vec3, high: Vec3, width: f32) {
-        let run = high - low;
-        let horizontal = Vec2::new(run.x, run.z);
-        let length = run.length();
-        let thickness = 0.4;
-        let yaw = (-horizontal.y).atan2(horizontal.x);
-        let pitch = run.y.atan2(horizontal.length());
-        let rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_z(pitch);
-        let center = (low + high) / 2.0 - rotation * Vec3::Y * (thickness / 2.0);
-        self.block(
-            center,
-            Vec3::new(length, thickness, width),
-            rotation,
-            WOOD,
-            0.1,
-        );
-    }
-
-    fn crate_stack(&mut self, base: Vec3, count: u32) {
-        for i in 0..count {
-            let size = self.rng.random_range(1.1..1.5);
-            let offset = Vec3::new(
-                self.rng.random_range(-1.4..1.4),
-                0.0,
-                self.rng.random_range(-1.4..1.4),
-            );
-            let stacked = i > 0 && self.rng.random_bool(0.35);
-            let y = if stacked { size * 1.5 } else { size * 0.5 };
-            let at = if stacked { base } else { base + offset };
-            let yaw = self.rng.random_range(-0.4..0.4);
-            self.block(
-                Vec3::new(at.x, base.y + y, at.z),
-                Vec3::splat(size),
-                Quat::from_rotation_y(yaw),
-                CRATE,
-                0.14,
-            );
-        }
-    }
-
-    fn rock(&mut self, at: Vec3, size: Vec3) {
-        let seed = self.rng.random::<u32>();
-        let raw = lowpoly::rock(size, seed);
-        let hull = Collider::convex_hull(&lowpoly::positions(&raw));
-        let mesh = lowpoly::facet(raw, ROCK, 0.18, &mut self.rng);
-        let transform = Transform::from_translation(at)
-            .with_rotation(Quat::from_rotation_y(self.rng.random_range(0.0..TAU)));
-        match hull {
-            Some(collider) => self.solid(mesh, transform, collider),
-            None => {
-                self.mesh(mesh, transform);
-            }
-        }
-    }
-
-    fn pine(&mut self, at: Vec3, height: f32, collide: bool) {
-        let mesh = lowpoly::pine(height, &mut self.rng);
-        let transform = Transform::from_translation(at);
-        if collide {
-            self.solid(
-                mesh,
-                transform,
-                Collider::compound(vec![(
-                    Vec3::Y * height * 0.5,
-                    Quat::IDENTITY,
-                    Collider::cylinder(height * 0.09, height),
-                )]),
-            );
-        } else {
-            self.mesh(mesh, transform);
-        }
-    }
-
-    fn pillar(&mut self, at: Vec3, height: f32) {
-        let mesh = Cylinder::new(0.6, height).mesh().resolution(7).build();
-        let mesh = lowpoly::facet(mesh, STONE, 0.1, &mut self.rng);
-        self.solid(
-            mesh,
-            Transform::from_translation(at + Vec3::Y * height / 2.0),
-            Collider::cylinder(0.6, height),
-        );
-    }
-}
-
-fn spawn_level(
+pub fn spawn_level(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -491,122 +349,5 @@ fn platforms(b: &mut Builder) {
             Vec3::new(20.5 * sx, height, 24.0 * sz),
             2.6,
         );
-    }
-}
-
-fn lamp(b: &mut Builder, at: Vec3, lantern: Handle<StandardMaterial>, shadows: bool) {
-    let post_h = 3.4;
-    b.block(
-        at + Vec3::Y * post_h / 2.0,
-        Vec3::new(0.2, post_h, 0.2),
-        Quat::IDENTITY,
-        IRON,
-        0.0,
-    );
-    let mesh = b.meshes.add(Cuboid::new(0.34, 0.42, 0.34));
-    b.commands.spawn((
-        Mesh3d(mesh),
-        MeshMaterial3d(lantern),
-        Transform::from_translation(at + Vec3::Y * (post_h + 0.2)),
-        bevy::light::NotShadowCaster,
-    ));
-    b.commands.spawn((
-        PointLight {
-            color: Color::srgb(1.0, 0.68, 0.38),
-            intensity: 14_000.0,
-            range: 20.0,
-            radius: 0.15,
-            shadow_maps_enabled: shadows,
-            contact_shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_translation(at + Vec3::Y * (post_h - 0.1)),
-        Flicker {
-            base: 14_000.0,
-            seed: at.x * 0.37 + at.z * 0.71,
-        },
-    ));
-}
-
-fn campfire(b: &mut Builder, at: Vec3, flame: Handle<StandardMaterial>) {
-    for i in 0..4 {
-        let yaw = i as f32 / 4.0 * TAU + 0.3;
-        let mesh = Cylinder::new(0.11, 1.2).mesh().resolution(6).build();
-        let mesh = lowpoly::facet(mesh, WOOD, 0.15, &mut b.rng);
-        let rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_z(1.25);
-        b.mesh(
-            mesh,
-            Transform::from_translation(at + Vec3::Y * 0.25).with_rotation(rotation),
-        );
-    }
-    for i in 0..8 {
-        let angle = i as f32 / 8.0 * TAU;
-        let seed = b.rng.random::<u32>();
-        let mesh = lowpoly::facet(
-            lowpoly::rock(Vec3::new(0.22, 0.16, 0.18), seed),
-            ROCK,
-            0.15,
-            &mut b.rng,
-        );
-        b.mesh(
-            mesh,
-            Transform::from_translation(at + Vec3::new(angle.cos(), 0.05, angle.sin()) * 0.75),
-        );
-    }
-    for (i, (radius, height)) in [(0.32, 0.9), (0.2, 1.25), (0.24, 0.7)]
-        .into_iter()
-        .enumerate()
-    {
-        let mesh = b
-            .meshes
-            .add(Cone { radius, height }.mesh().resolution(5).build());
-        let offset = Vec3::new(
-            (i as f32 - 1.0) * 0.12,
-            height / 2.0 + 0.1,
-            (i as f32 * 2.1).sin() * 0.1,
-        );
-        b.commands.spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(flame.clone()),
-            Transform::from_translation(at + offset),
-            FlameMesh(i as f32 * 1.7),
-            bevy::light::NotShadowCaster,
-        ));
-    }
-    b.commands.spawn((
-        PointLight {
-            color: Color::srgb(1.0, 0.5, 0.18),
-            intensity: 40_000.0,
-            range: 24.0,
-            radius: 0.3,
-            shadow_maps_enabled: true,
-            contact_shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_translation(at + Vec3::Y * 0.9),
-        Flicker {
-            base: 40_000.0,
-            seed: 3.3,
-        },
-    ));
-}
-
-fn flicker(
-    time: Res<Time>,
-    mut lights: Query<(&mut PointLight, &Flicker)>,
-    mut flames: Query<(&mut Transform, &FlameMesh)>,
-) {
-    let t = time.elapsed_secs();
-    for (mut light, f) in &mut lights {
-        let s = f.seed;
-        let wobble = (t * 7.3 + s).sin() * 0.06
-            + (t * 13.1 + s * 2.0).sin() * 0.04
-            + (t * 23.7 + s * 3.0).sin() * 0.03;
-        light.intensity = f.base * (1.0 + wobble);
-    }
-    for (mut transform, FlameMesh(phase)) in &mut flames {
-        let k = 1.0 + (t * 11.0 + phase).sin() * 0.12 + (t * 17.0 + phase * 2.0).sin() * 0.08;
-        transform.scale = Vec3::new(1.0 / k.sqrt(), k, 1.0 / k.sqrt());
-        transform.rotation = Quat::from_rotation_y(t * 1.5 + phase);
     }
 }

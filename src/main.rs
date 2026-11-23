@@ -5,18 +5,19 @@
 //! `fast-fps +connect 192.168.1.20`.
 
 mod avatar;
-mod bot;
+mod config;
 mod console;
 mod debug;
-mod game;
 mod hud;
-mod level;
 mod lowpoly;
 mod net;
+mod physics;
 mod player;
 mod render;
+mod server;
 mod sound;
 mod weapon;
+mod world;
 
 use avian3d::prelude::*;
 use bevy::{prelude::*, window::PresentMode};
@@ -30,7 +31,7 @@ fn main() -> AppExit {
         .add_plugins(
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Window {
-                    title: "fast-fps".to_string(),
+                    title: config::GAME_NAME.to_string(),
                     present_mode: PresentMode::AutoNoVsync,
                     ..default()
                 }
@@ -53,28 +54,13 @@ fn main() -> AppExit {
             net::plugin,
             render::plugin,
             sound::plugin,
-            level::plugin,
-            game::plugin,
+            world::plugin,
+            server::plugin,
             player::plugin,
             weapon::plugin,
             hud::plugin,
             debug::plugin,
             avatar::plugin,
-            bot::plugin,
         ))
         .run()
-}
-
-/// Physics layers. The local character controller only collides with `World`,
-/// so other players never block movement; hit scans test `World | Hitbox`.
-#[derive(PhysicsLayer, Default, Clone, Copy, Debug)]
-pub enum Layer {
-    #[default]
-    World,
-    /// The character controller you are driving on this machine.
-    LocalBody,
-    /// Server-side player and dummy hitboxes.
-    Hitbox,
-    /// Corpses: collide with the world only, and never stop bullets or players.
-    Ragdoll,
 }

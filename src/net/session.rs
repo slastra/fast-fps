@@ -1,16 +1,12 @@
-//! Networking: the replication protocol plus host / connect / discovery commands.
-//!
-//! The game uses Replicon's recommended layout. Authoritative logic (damage,
-//! respawns, dummies) runs whenever we are *not* a client, so the same code
-//! drives offline play and a listen server. Clients only send intent: where
-//! they are and where they shot.
+//! Starting and ending a session: the `host`, `connect`, `disconnect`,
+//! `status` and `name` commands, and swapping worlds when the role changes.
 
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket},
     time::{Duration, SystemTime},
 };
 
-use bevy::{ecs::entity::MapEntities, prelude::*};
+use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 use bevy_replicon_renet::{
     RenetChannelsExt, RenetClient, RenetServer,
@@ -20,162 +16,36 @@ use bevy_replicon_renet::{
     },
     renet::ConnectionConfig,
 };
-use serde::{Deserialize, Serialize};
 
-use crate::console::{Console, ConsoleAppExt, ConsoleCommand, Print, SaveSetting};
-use crate::weapon::WeaponKind;
+use crate::{
+    config::{DEFAULT_PORT, MAX_CLIENTS, PROTOCOL_ID},
+    console::{Console, ConsoleAppExt, ConsoleCommand, Print, SaveSetting},
+    net::{
+        discovery::{Beacon, Discovery},
+        protocol::{Feed, Health, Player, PlayerName, Score, SetName},
+    },
+};
 
-pub const DEFAULT_PORT: u16 = 27015;
-const DISCOVERY_PORT: u16 = 27016;
-const PROTOCOL_ID: u64 = 0xFA57_0001;
-const BEACON_MAGIC: &str = "FASTFPS";
-const MAX_CLIENTS: usize = 16;
+pub(super) fn plugin(app: &mut App) {
+    app.init_resource::<LocalId>()
+        .init_resource::<LocalName>()
+        .add_systems(Update, (net_commands, watch_client))
+        .add_systems(PreUpdate, print_feed.after(ClientSystems::Receive))
+        .add_systems(OnEnter(ClientState::Connecting), drop_local_world)
+        .add_systems(OnEnter(ClientState::Connected), on_connected)
+        .add_systems(OnExit(ClientState::Connected), drop_remote_world);
 
-// ---------------------------------------------------------------------------
-// Replicated state
-// ---------------------------------------------------------------------------
-
-/// A player. `owner` is the netcode client id, or `0` for the host / offline player.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]
-#[require(Transform, Visibility)]
-pub struct Player {
-    pub owner: u64,
+    app.console_command("host", "[port]", "start a LAN server (default 27015)")
+        .console_command(
+            "connect",
+            "[ip[:port]]",
+            "join a server; no address = first one found",
+        )
+        .console_command("disconnect", "", "leave the server or stop hosting")
+        .console_command("find", "", "look for servers on the LAN")
+        .console_command("status", "", "show connection and scores")
+        .console_command("name", "<name>", "set your player name");
 }
-
-#[derive(Component, Serialize, Deserialize, Clone, Debug)]
-pub struct PlayerName(pub String);
-
-/// Where a player or dummy is. `pos` is the collider center.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default)]
-pub struct Pose {
-    pub pos: Vec3,
-    pub yaw: f32,
-    pub pitch: f32,
-    /// World-space velocity, used to animate the body.
-    pub vel: Vec3,
-    /// `Pose::CROUCH | Pose::AIR | Pose::RELOAD`.
-    pub flags: u8,
-}
-
-impl Pose {
-    pub const CROUCH: u8 = 1;
-    pub const AIR: u8 = 2;
-    pub const RELOAD: u8 = 4;
-
-    pub fn has(&self, flag: u8) -> bool {
-        self.flags & flag != 0
-    }
-
-    pub fn set(&mut self, flag: u8, on: bool) {
-        if on {
-            self.flags |= flag;
-        } else {
-            self.flags &= !flag;
-        }
-    }
-}
-
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]
-pub struct Health(pub f32);
-
-/// The weapon a player is holding.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
-pub struct Loadout(pub WeaponKind);
-
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default)]
-pub struct Score {
-    pub kills: u32,
-    pub deaths: u32,
-}
-
-/// A practice target. `sway` is how far it slides side to side.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]
-#[require(Transform, Visibility)]
-pub struct Dummy {
-    pub anchor: Vec3,
-    pub sway: f32,
-}
-
-/// A dummy that has been knocked down and is waiting to pop back up.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]
-pub struct Downed;
-
-// ---------------------------------------------------------------------------
-// Messages
-// ---------------------------------------------------------------------------
-
-/// Client -> server: my character's current pose. Sent every frame, unreliable.
-#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
-pub struct MoveInput(pub Pose);
-
-/// Client -> server: I fired `weapon` from `origin`; one direction per pellet.
-#[derive(Message, Serialize, Deserialize, Clone, Debug)]
-pub struct Fire {
-    pub weapon: WeaponKind,
-    pub origin: Vec3,
-    pub dirs: Vec<Vec3>,
-}
-
-/// Client -> server: I switched weapons (so others see it).
-#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
-pub struct SelectWeapon(pub WeaponKind);
-
-#[derive(Message, Serialize, Deserialize, Clone, Debug)]
-pub struct SetName(pub String);
-
-#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
-pub struct Suicide;
-
-/// Server -> clients: someone else's shot (one per pellet), for tracers and impacts.
-#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
-pub struct ShotFx {
-    /// `Player::owner` of whoever fired.
-    pub shooter: u64,
-    pub weapon: WeaponKind,
-    pub origin: Vec3,
-    pub end: Vec3,
-    pub normal: Vec3,
-    pub flesh: bool,
-}
-
-/// Server -> everyone: `target` was hit. Drives flinches, dummy wobble and,
-/// when `killed`, the ragdoll.
-#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug, MapEntities)]
-pub struct Damaged {
-    #[entities]
-    pub target: Entity,
-    /// Direction the shot was traveling.
-    pub dir: Vec3,
-    pub point: Vec3,
-    pub weapon: WeaponKind,
-    pub killed: bool,
-    /// Where the target stood when hit. A killed player may already have
-    /// respawned elsewhere by the time this arrives.
-    pub pos: Vec3,
-    pub yaw: f32,
-}
-
-/// Server -> shooter: your shot connected.
-#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
-pub struct HitConfirm {
-    pub head: bool,
-    pub kill: bool,
-}
-
-/// Server -> one client: put your character here.
-#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
-pub struct Respawn {
-    pub pos: Vec3,
-    pub yaw: f32,
-}
-
-/// Server -> everyone: a line for the kill feed and console.
-#[derive(Message, Serialize, Deserialize, Clone, Debug)]
-pub struct Feed(pub String);
-
-// ---------------------------------------------------------------------------
-// Local identity
-// ---------------------------------------------------------------------------
 
 /// The `Player::owner` value that belongs to this machine.
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
@@ -194,55 +64,6 @@ impl Default for LocalName {
     }
 }
 
-pub(super) fn plugin(app: &mut App) {
-    app.replicate::<Player>()
-        .replicate::<PlayerName>()
-        .replicate::<Pose>()
-        .replicate::<Health>()
-        .replicate::<Score>()
-        .replicate::<Loadout>()
-        .replicate::<Dummy>()
-        .replicate::<Downed>()
-        .add_client_message::<MoveInput>(Channel::Unreliable)
-        .add_client_message::<Fire>(Channel::Ordered)
-        .add_client_message::<SelectWeapon>(Channel::Ordered)
-        .add_client_message::<SetName>(Channel::Ordered)
-        .add_client_message::<Suicide>(Channel::Ordered)
-        .add_server_message::<ShotFx>(Channel::Unreliable)
-        .add_mapped_server_message::<Damaged>(Channel::Ordered)
-        .add_server_message::<HitConfirm>(Channel::Ordered)
-        .add_server_message::<Respawn>(Channel::Ordered)
-        .add_server_message::<Feed>(Channel::Ordered);
-
-    app.init_resource::<LocalId>()
-        .init_resource::<LocalName>()
-        .init_resource::<Discovery>()
-        .add_systems(
-            Update,
-            (
-                net_commands,
-                watch_client,
-                send_beacon.run_if(resource_exists::<Beacon>),
-                listen_for_beacons,
-            ),
-        )
-        .add_systems(PreUpdate, print_feed.after(ClientSystems::Receive))
-        .add_systems(OnEnter(ClientState::Connecting), drop_local_world)
-        .add_systems(OnEnter(ClientState::Connected), on_connected)
-        .add_systems(OnExit(ClientState::Connected), drop_remote_world);
-
-    app.console_command("host", "[port]", "start a LAN server (default 27015)")
-        .console_command(
-            "connect",
-            "[ip[:port]]",
-            "join a server; no address = first one found",
-        )
-        .console_command("disconnect", "", "leave the server or stop hosting")
-        .console_command("find", "", "look for servers on the LAN")
-        .console_command("status", "", "show connection and scores")
-        .console_command("name", "<name>", "set your player name");
-}
-
 fn connection_config(channels: &RepliconChannels) -> ConnectionConfig {
     ConnectionConfig {
         server_channels_config: channels.server_configs(),
@@ -257,7 +78,7 @@ fn now() -> Duration {
         .unwrap_or_default()
 }
 
-fn net_commands(
+pub fn net_commands(
     mut cmds: MessageReader<ConsoleCommand>,
     mut commands: Commands,
     mut print: MessageWriter<Print>,
@@ -471,7 +292,7 @@ fn lan_ip() -> Option<IpAddr> {
 }
 
 /// Notice when the server goes away or a connection attempt fails, and clean up.
-fn watch_client(
+pub fn watch_client(
     mut commands: Commands,
     client: Option<Res<RenetClient>>,
     transport: Option<Res<NetcodeClientTransport>>,
@@ -494,7 +315,7 @@ fn watch_client(
 
 /// Becoming a client: the offline/host world we were simulating is now someone
 /// else's job, so drop it and wait for replication.
-fn drop_local_world(
+pub fn drop_local_world(
     mut commands: Commands,
     entities: Query<Entity, (With<Replicated>, Without<Remote>)>,
 ) {
@@ -503,7 +324,7 @@ fn drop_local_world(
     }
 }
 
-fn drop_remote_world(
+pub fn drop_remote_world(
     mut commands: Commands,
     entities: Query<Entity, With<Remote>>,
     mut local_id: ResMut<LocalId>,
@@ -516,7 +337,7 @@ fn drop_remote_world(
     print.write(Print::new("back to offline play"));
 }
 
-fn on_connected(
+pub fn on_connected(
     mut print: MessageWriter<Print>,
     mut set_name: MessageWriter<SetName>,
     name: Res<LocalName>,
@@ -525,117 +346,8 @@ fn on_connected(
     set_name.write(SetName(name.0.clone()));
 }
 
-fn print_feed(mut feed: MessageReader<Feed>, mut print: MessageWriter<Print>) {
+pub fn print_feed(mut feed: MessageReader<Feed>, mut print: MessageWriter<Print>) {
     for Feed(line) in feed.read() {
         print.write(Print(line.clone()));
-    }
-}
-
-// ---------------------------------------------------------------------------
-// LAN discovery: the host broadcasts a small UDP beacon once a second.
-// ---------------------------------------------------------------------------
-
-#[derive(Resource)]
-struct Beacon {
-    socket: UdpSocket,
-    port: u16,
-    timer: Timer,
-}
-
-fn send_beacon(
-    mut beacon: ResMut<Beacon>,
-    time: Res<Time<Real>>,
-    name: Res<LocalName>,
-    players: Query<(), With<Player>>,
-) {
-    if !beacon.timer.tick(time.delta()).just_finished() {
-        return;
-    }
-    let msg = format!(
-        "{BEACON_MAGIC} {} {} {}",
-        beacon.port,
-        players.iter().count(),
-        name.0
-    );
-    let _ = beacon
-        .socket
-        .send_to(msg.as_bytes(), (Ipv4Addr::BROADCAST, DISCOVERY_PORT));
-}
-
-#[derive(Resource, Default)]
-struct Discovery {
-    socket: Option<UdpSocket>,
-    timer: Timer,
-    found: Vec<(SocketAddr, String)>,
-    auto_connect: bool,
-    pending_connect: Option<String>,
-}
-
-impl Discovery {
-    fn start(&mut self, auto_connect: bool, print: &mut MessageWriter<Print>) {
-        let socket = match UdpSocket::bind((Ipv4Addr::UNSPECIFIED, DISCOVERY_PORT)) {
-            Ok(s) => s,
-            Err(e) => {
-                print.write(Print(format!(
-                    "can't listen on UDP {DISCOVERY_PORT} ({e}); use 'connect <ip>'"
-                )));
-                return;
-            }
-        };
-        let _ = socket.set_nonblocking(true);
-        self.socket = Some(socket);
-        self.timer = Timer::from_seconds(1.6, TimerMode::Once);
-        self.found.clear();
-        self.auto_connect = auto_connect;
-    }
-}
-
-fn listen_for_beacons(
-    mut discovery: ResMut<Discovery>,
-    time: Res<Time<Real>>,
-    mut print: MessageWriter<Print>,
-) {
-    let Some(socket) = &discovery.socket else {
-        return;
-    };
-    let mut buf = [0u8; 256];
-    let mut found = Vec::new();
-    while let Ok((len, from)) = socket.recv_from(&mut buf) {
-        let Ok(text) = std::str::from_utf8(&buf[..len]) else {
-            continue;
-        };
-        let mut parts = text.splitn(4, ' ');
-        if parts.next() != Some(BEACON_MAGIC) {
-            continue;
-        }
-        let Some(port) = parts.next().and_then(|p| p.parse::<u16>().ok()) else {
-            continue;
-        };
-        let players = parts.next().unwrap_or("?");
-        let host = parts.next().unwrap_or("?");
-        found.push((
-            SocketAddr::new(from.ip(), port),
-            format!("{host}'s game, {players} player(s)"),
-        ));
-    }
-    for (addr, desc) in found {
-        if !discovery.found.iter().any(|(a, _)| *a == addr) {
-            discovery.found.push((addr, desc));
-        }
-    }
-    if !discovery.timer.tick(time.delta()).just_finished() {
-        return;
-    }
-    discovery.socket = None;
-    if discovery.found.is_empty() {
-        print.write(Print::new("no servers found"));
-        return;
-    }
-    for (addr, desc) in &discovery.found {
-        print.write(Print(format!("  {addr}  {desc}")));
-    }
-    if discovery.auto_connect {
-        let addr = discovery.found[0].0;
-        discovery.pending_connect = Some(format!("connect {addr}"));
     }
 }

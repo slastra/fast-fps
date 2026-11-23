@@ -16,13 +16,12 @@ use rand::Rng;
 
 use super::rig::{AvatarRig, BONE_COUNT, JointKind, SKELETON};
 use crate::{
-    Layer,
+    config::{MAX_RAGDOLLS, RAGDOLL_SECS},
+    physics::Layer,
     render::no_shadow,
     weapon::{self, WeaponKind},
 };
 
-const MAX_RAGDOLLS: usize = 6;
-const LIFE_SECS: f32 = 12.0;
 const FADE_SECS: f32 = 0.6;
 
 /// Live ragdolls, oldest first.
@@ -212,12 +211,12 @@ pub fn age(
         if let Some(oldest) = list.0.pop_front()
             && let Ok((_, mut ragdoll)) = ragdolls.get_mut(oldest)
         {
-            ragdoll.age = ragdoll.age.max(LIFE_SECS);
+            ragdoll.age = ragdoll.age.max(RAGDOLL_SECS);
         }
     }
     for (entity, mut ragdoll) in &mut ragdolls {
         ragdoll.age += time.delta_secs();
-        if ragdoll.age < LIFE_SECS {
+        if ragdoll.age < RAGDOLL_SECS {
             continue;
         }
         // Take the corpse out of the simulation before shrinking it: scaling
@@ -233,7 +232,7 @@ pub fn age(
                     .try_remove::<(RigidBody, Collider, TransformInterpolation)>();
             }
         }
-        let scale = 1.0 - (ragdoll.age - LIFE_SECS) / FADE_SECS;
+        let scale = 1.0 - (ragdoll.age - RAGDOLL_SECS) / FADE_SECS;
         if scale <= 0.02 {
             for body in &ragdoll.bodies {
                 commands.entity(*body).try_despawn();

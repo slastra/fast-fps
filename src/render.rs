@@ -16,7 +16,7 @@ use bevy::{
     prelude::*,
 };
 
-pub const DEFAULT_FOV: f32 = 80.0;
+use crate::config::DEFAULT_FOV;
 
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(GlobalAmbientLight::NONE)

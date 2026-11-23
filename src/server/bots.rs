@@ -12,17 +12,20 @@ use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
 use crate::{
-    Layer,
+    config::{GRAVITY, MAX_HEALTH, SHOT_RANGE},
     console::{ConsoleAppExt, ConsoleCommand, Print},
-    game::{self, Died, MAX_HEALTH},
     net::{Health, Loadout, Player, PlayerName, Pose, Score, ShotFx},
+    physics::Layer,
     player::LocalPlayer,
+    server::{
+        combat::Died,
+        players::{hitbox, pick_spawn},
+    },
     weapon::WeaponKind,
 };
 
 /// `Player::owner` ids for bots start here, clear of real client ids.
 const BOT_OWNER: u64 = 0xB07_0000;
-const GRAVITY: f32 = 29.0;
 const JUMP_SPEED: f32 = 8.4;
 const EYE: f32 = 0.8;
 
@@ -129,7 +132,7 @@ fn bot_commands(
                     ..default()
                 },
                 Transform::from_translation(pos).with_rotation(Quat::from_rotation_y(yaw)),
-                game::hitbox(),
+                hitbox(),
                 Bot {
                     id,
                     home: pos,
@@ -272,10 +275,10 @@ fn drive(
                 let dir = aim * spread * Vec3::NEG_Z;
                 let hit = Dir3::new(dir)
                     .ok()
-                    .and_then(|d| spatial.cast_ray(origin, d, 250.0, true, &filter));
+                    .and_then(|d| spatial.cast_ray(origin, d, SHOT_RANGE, true, &filter));
                 let (end, normal) = match hit {
                     Some(hit) => (origin + dir * hit.distance, hit.normal),
-                    None => (origin + dir * 250.0, Vec3::ZERO),
+                    None => (origin + dir * SHOT_RANGE, Vec3::ZERO),
                 };
                 fx.write(ToClients {
                     targets: SendTargets::All,
@@ -309,7 +312,7 @@ fn drive(
 fn respawn(mut deaths: MessageReader<Died>, mut bots: Query<&mut Bot>) {
     for Died(entity) in deaths.read() {
         if let Ok(mut bot) = bots.get_mut(*entity) {
-            let (pos, yaw) = game::pick_spawn();
+            let (pos, yaw) = pick_spawn();
             bot.home = pos;
             bot.yaw = yaw;
             bot.distance = 0.0;
