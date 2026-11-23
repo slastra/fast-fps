@@ -48,6 +48,7 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<Arsenal>()
         .init_resource::<HitMarker>()
         .init_resource::<ScriptedFire>()
+        .init_resource::<HideViewModel>()
         .init_resource::<Zoom>()
         .add_systems(PostStartup, build_view_models)
         .add_systems(
@@ -70,6 +71,10 @@ pub(super) fn plugin(app: &mut App) {
     app.console_command("weapon", "<ak|mp5|glock|shotgun|sniper>", "switch weapons")
         .console_command("zoom", "<level>", "scope zoom level (sniper only)");
 }
+
+/// Set by `r_viewmodel 0` to keep your own gun off screen.
+#[derive(Resource, Default)]
+pub struct HideViewModel(pub bool);
 
 /// Shots queued by the `fire` console command (for scripted tests).
 #[derive(Resource, Default)]
@@ -298,24 +303,37 @@ pub fn spawn_avatar_guns(
     rng: &mut StdRng,
 ) {
     for kind in WeaponKind::ALL {
-        let model = models::model(kind);
-        let parts = models::build(&model, meshes, rng);
         parent
             .spawn((
                 AvatarGun(kind),
-                Transform::from_xyz(0.24, -0.22, -0.18),
+                Transform::default(),
                 if kind == WeaponKind::Ak {
                     Visibility::Inherited
                 } else {
                     Visibility::Hidden
                 },
             ))
-            .with_children(|gun| {
-                for (mesh, transform, _) in parts {
-                    gun.spawn((mesh, material.clone(), transform));
-                }
-            });
+            .with_children(|gun| spawn_gun(gun, kind, meshes, material, rng));
     }
+}
+
+/// Spawn one full-size gun model's parts under `parent`.
+pub fn spawn_gun(
+    parent: &mut ChildSpawnerCommands,
+    kind: WeaponKind,
+    meshes: &mut Assets<Mesh>,
+    material: &MeshMaterial3d<StandardMaterial>,
+    rng: &mut StdRng,
+) {
+    let model = models::model(kind);
+    for (mesh, transform, _) in models::build(&model, meshes, rng) {
+        parent.spawn((mesh, material.clone(), transform));
+    }
+}
+
+/// Where the muzzle is on a full-size gun model.
+pub fn muzzle(kind: WeaponKind) -> Vec3 {
+    models::model(kind).muzzle
 }
 
 fn show_avatar_guns(
@@ -649,6 +667,7 @@ fn animate_gun(
     mut arsenal: ResMut<Arsenal>,
     player: Single<&LinearVelocity, With<LocalPlayer>>,
     muzzles: Res<Muzzles>,
+    hidden: Res<HideViewModel>,
     mut root: Single<(&mut Transform, &mut Visibility), With<GunRoot>>,
     mut guns: Query<(&ViewGun, &mut Visibility), Without<GunRoot>>,
     mut pumps: Query<(&PumpPart, &mut Transform), Without<GunRoot>>,
@@ -685,8 +704,8 @@ fn animate_gun(
         };
         visibility.set_if_neq(want);
     }
-    // Hide the gun while looking through the scope.
-    root.1.set_if_neq(if arsenal.scoped() {
+    // Hide the gun while looking through the scope (or when asked to).
+    root.1.set_if_neq(if arsenal.scoped() || hidden.0 {
         Visibility::Hidden
     } else {
         Visibility::Inherited

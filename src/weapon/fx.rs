@@ -7,7 +7,8 @@ use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use super::WeaponKind;
 use crate::{
-    net::ShotFx,
+    avatar::rig::AvatarRig,
+    net::{Player, ShotFx},
     render::{WorldCamera, no_shadow},
     sound::{Sounds, play},
 };
@@ -194,12 +195,20 @@ fn remote_shots(
     mut rng: ResMut<FxRng>,
     mut decals: ResMut<Decals>,
     listener: Single<&GlobalTransform, With<WorldCamera>>,
+    avatars: Query<(&Player, &AvatarRig)>,
+    globals: Query<&GlobalTransform>,
 ) {
     // Shotguns send one message per pellet; flash and play sound once per blast.
     let mut blasts: Vec<Vec3> = Vec::new();
     for shot in shots.read() {
+        // Start at the shooter's muzzle if we can see their body.
         let dir = (shot.end - shot.origin).normalize_or_zero();
-        let start = shot.origin + dir * 0.7 - Vec3::Y * 0.15;
+        let start = avatars
+            .iter()
+            .find(|(player, _)| player.owner == shot.shooter)
+            .and_then(|(_, rig)| globals.get(rig.gun).ok())
+            .map(|gun| gun.transform_point(super::muzzle(shot.weapon)))
+            .unwrap_or(shot.origin + dir * 0.7 - Vec3::Y * 0.15);
         tracer(&mut commands, &fx, start, shot.end, shot.weapon);
         if shot.normal != Vec3::ZERO {
             impact(

@@ -10,7 +10,7 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use bevy::prelude::*;
+use bevy::{ecs::entity::MapEntities, prelude::*};
 use bevy_replicon::prelude::*;
 use bevy_replicon_renet::{
     RenetChannelsExt, RenetClient, RenetServer,
@@ -51,6 +51,28 @@ pub struct Pose {
     pub pos: Vec3,
     pub yaw: f32,
     pub pitch: f32,
+    /// World-space velocity, used to animate the body.
+    pub vel: Vec3,
+    /// `Pose::CROUCH | Pose::AIR | Pose::RELOAD`.
+    pub flags: u8,
+}
+
+impl Pose {
+    pub const CROUCH: u8 = 1;
+    pub const AIR: u8 = 2;
+    pub const RELOAD: u8 = 4;
+
+    pub fn has(&self, flag: u8) -> bool {
+        self.flags & flag != 0
+    }
+
+    pub fn set(&mut self, flag: u8, on: bool) {
+        if on {
+            self.flags |= flag;
+        } else {
+            self.flags &= !flag;
+        }
+    }
 }
 
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]
@@ -107,11 +129,30 @@ pub struct Suicide;
 /// Server -> clients: someone else's shot (one per pellet), for tracers and impacts.
 #[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct ShotFx {
+    /// `Player::owner` of whoever fired.
+    pub shooter: u64,
     pub weapon: WeaponKind,
     pub origin: Vec3,
     pub end: Vec3,
     pub normal: Vec3,
     pub flesh: bool,
+}
+
+/// Server -> everyone: `target` was hit. Drives flinches, dummy wobble and,
+/// when `killed`, the ragdoll.
+#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug, MapEntities)]
+pub struct Damaged {
+    #[entities]
+    pub target: Entity,
+    /// Direction the shot was traveling.
+    pub dir: Vec3,
+    pub point: Vec3,
+    pub weapon: WeaponKind,
+    pub killed: bool,
+    /// Where the target stood when hit. A killed player may already have
+    /// respawned elsewhere by the time this arrives.
+    pub pos: Vec3,
+    pub yaw: f32,
 }
 
 /// Server -> shooter: your shot connected.
@@ -168,6 +209,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_client_message::<SetName>(Channel::Ordered)
         .add_client_message::<Suicide>(Channel::Ordered)
         .add_server_message::<ShotFx>(Channel::Unreliable)
+        .add_mapped_server_message::<Damaged>(Channel::Ordered)
         .add_server_message::<HitConfirm>(Channel::Ordered)
         .add_server_message::<Respawn>(Channel::Ordered)
         .add_server_message::<Feed>(Channel::Ordered);

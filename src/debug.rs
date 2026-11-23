@@ -18,7 +18,7 @@ use crate::{
     console::{ConsoleAppExt, ConsoleCommand, Print},
     player::{LocalPlayer, ViewRig},
     render::{WorldCamera, fog, set_anti_aliasing},
-    weapon::{GunRoot, ScriptedFire},
+    weapon::{HideViewModel, ScriptedFire},
 };
 
 pub(super) fn plugin(app: &mut App) {
@@ -49,7 +49,12 @@ pub(super) fn plugin(app: &mut App) {
     .console_command("r_fog", "<0|1>", "distance fog")
     .console_command("r_contact", "<0|1>", "contact shadows")
     .console_command("r_shadows", "<0|1>", "shadow maps on every light")
-    .console_command("r_viewmodel", "<0|1>", "draw the gun");
+    .console_command("r_viewmodel", "<0|1>", "draw the gun")
+    .console_command(
+        "r_ambient",
+        "<brightness>",
+        "flat fill light for inspecting models; 0 is off",
+    );
 }
 
 #[derive(Resource, Default)]
@@ -99,7 +104,7 @@ fn debug_commands(
     mut scripted_fire: ResMut<ScriptedFire>,
     mut pending_look: ResMut<PendingLook>,
     world_camera: Single<Entity, With<WorldCamera>>,
-    mut gun: Single<&mut Visibility, With<GunRoot>>,
+    mut hide_view_model: ResMut<HideViewModel>,
     mut player: Single<(&mut Transform, &mut Position, &mut LinearVelocity), With<LocalPlayer>>,
     mut point_lights: Query<&mut PointLight>,
     mut directional: Query<&mut DirectionalLight>,
@@ -107,6 +112,17 @@ fn debug_commands(
     let camera = *world_camera;
     for cmd in cmds.read() {
         let name = cmd.name.as_str();
+        if name == "r_ambient" {
+            let brightness = cmd
+                .arg(0)
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.0);
+            commands.insert_resource(GlobalAmbientLight {
+                brightness: brightness.max(0.0),
+                ..default()
+            });
+            continue;
+        }
         if name == "r_aa" {
             let mode = cmd.arg(0).unwrap_or("");
             if !set_anti_aliasing(&mut commands, camera, mode) {
@@ -129,13 +145,7 @@ fn debug_commands(
                 "r_bloom" => toggle(&mut commands, camera, on, || Bloom::NATURAL),
                 "r_fog" => toggle::<DistanceFog>(&mut commands, camera, on, fog),
                 "r_contact" => toggle(&mut commands, camera, on, ContactShadows::default),
-                "r_viewmodel" => {
-                    **gun = if on {
-                        Visibility::Inherited
-                    } else {
-                        Visibility::Hidden
-                    };
-                }
+                "r_viewmodel" => hide_view_model.0 = !on,
                 "r_shadows" => {
                     for mut light in &mut point_lights {
                         light.shadow_maps_enabled = on;

@@ -11,8 +11,8 @@ use crate::{
     Layer,
     level::{DUMMIES, SPAWNS},
     net::{
-        Downed, Dummy, Feed, Fire, Health, HitConfirm, Loadout, LocalName, MoveInput, Player,
-        PlayerName, Pose, Respawn, Score, SelectWeapon, SetName, ShotFx, Suicide,
+        Damaged, Downed, Dummy, Feed, Fire, Health, HitConfirm, Loadout, LocalName, MoveInput,
+        Player, PlayerName, Pose, Respawn, Score, SelectWeapon, SetName, ShotFx, Suicide,
     },
 };
 
@@ -20,42 +20,70 @@ pub const MAX_HEALTH: f32 = 100.0;
 const RANGE: f32 = 250.0;
 const DUMMY_DOWN_SECS: f32 = 3.0;
 
-/// Server-only: which connection a player entity belongs to.
+/// Server-only: which connection a player entity belongs to. Bots have none.
 #[derive(Component, Clone, Copy)]
 struct PlayerClient(ClientId);
+
+/// Server-only: a player entity was killed (bots use this to respawn).
+#[derive(Message, Clone, Copy)]
+pub struct Died(pub Entity);
+
+/// Server-only: whether the hitbox is currently the crouched shape.
+#[derive(Component, Default, PartialEq, Clone, Copy)]
+struct CrouchedHitbox(bool);
+
+/// Height above the collider center where the head starts.
+fn head_line(pose: &Pose) -> f32 {
+    if pose.has(Pose::CROUCH) { 0.12 } else { 0.48 }
+}
 
 #[derive(Component)]
 struct DownTimer(Timer);
 
 pub(super) fn plugin(app: &mut App) {
     let authority = in_state(ClientState::Disconnected);
-    app.add_systems(
-        PreUpdate,
-        (
-            ensure_world,
-            receive_names,
-            receive_moves,
-            receive_fire,
-            receive_select,
-            receive_suicide,
+    app.add_message::<Died>()
+        .add_systems(
+            PreUpdate,
+            (
+                ensure_world,
+                receive_names,
+                receive_moves,
+                receive_fire,
+                receive_select,
+                receive_suicide,
+            )
+                .chain()
+                .after(ServerSystems::Receive)
+                .run_if(authority.clone()),
         )
-            .chain()
-            .after(ServerSystems::Receive)
-            .run_if(authority.clone()),
-    )
-    .add_systems(
-        FixedUpdate,
-        (move_dummies, tick_downed).run_if(authority.clone()),
-    )
-    .add_systems(Update, hitboxes_follow_pose.run_if(authority))
-    .add_observer(on_client_authorized)
-    .add_observer(on_client_removed);
+        .add_systems(
+            FixedUpdate,
+            (move_dummies, tick_downed).run_if(authority.clone()),
+        )
+        .add_systems(Update, hitboxes_follow_pose.run_if(authority))
+        .add_observer(on_client_authorized)
+        .add_observer(on_client_removed);
 }
 
-fn hitbox() -> impl Bundle {
+/// Standing: 1.8 m tall. Crouched: 1.34 m, keeping the feet where they are.
+fn hitbox_shape(crouched: bool) -> Collider {
+    if crouched {
+        Collider::compound(vec![(
+            Vec3::Y * -0.23,
+            Quat::IDENTITY,
+            Collider::capsule(0.38, 0.58),
+        )])
+    } else {
+        Collider::capsule(0.38, 1.04)
+    }
+}
+
+pub fn hitbox() -> impl Bundle {
     (
         RigidBody::Kinematic,
-        Collider::capsule(0.38, 1.04),
+        hitbox_shape(false),
+        CrouchedHitbox(false),
         CollisionLayers::new(Layer::Hitbox, LayerMask::NONE),
     )
 }
@@ -78,7 +106,7 @@ fn spawn_player(
         Pose {
             pos,
             yaw,
-            pitch: 0.0,
+            ..default()
         },
         Transform::from_translation(pos),
         PlayerClient(client),
@@ -90,7 +118,7 @@ fn spawn_player(
     });
 }
 
-fn pick_spawn() -> (Vec3, f32) {
+pub fn pick_spawn() -> (Vec3, f32) {
     let mut rng = rand::rng();
     let pos = SPAWNS[rng.random_range(0..SPAWNS.len())];
     // Face roughly toward the middle of the arena.
@@ -125,7 +153,7 @@ fn ensure_world(
                 Pose {
                     pos: anchor,
                     yaw: std::f32::consts::FRAC_PI_2,
-                    pitch: 0.0,
+                    ..default()
                 },
                 Transform::from_translation(anchor),
                 hitbox(),
@@ -222,16 +250,25 @@ fn receive_moves(
         };
         if let Ok(mut pose) = poses.get_mut(entity)
             && message.0.pos.is_finite()
+            && message.0.vel.is_finite()
         {
             *pose = message.0;
         }
     }
 }
 
-fn hitboxes_follow_pose(mut query: Query<(&Pose, &mut Transform), Changed<Pose>>) {
-    for (pose, mut transform) in &mut query {
+fn hitboxes_follow_pose(
+    mut commands: Commands,
+    mut query: Query<(Entity, &Pose, &mut Transform, &mut CrouchedHitbox), Changed<Pose>>,
+) {
+    for (entity, pose, mut transform, mut crouched) in &mut query {
         transform.translation = pose.pos;
         transform.rotation = Quat::from_rotation_y(pose.yaw);
+        let now = pose.has(Pose::CROUCH);
+        if crouched.0 != now {
+            crouched.0 = now;
+            commands.entity(entity).insert(hitbox_shape(now));
+        }
     }
 }
 
@@ -247,11 +284,15 @@ fn receive_fire(
     mut confirm: MessageWriter<ToClients<HitConfirm>>,
     mut feed: MessageWriter<ToClients<Feed>>,
     mut respawns: MessageWriter<ToClients<Respawn>>,
+    mut damaged: MessageWriter<ToClients<Damaged>>,
+    mut died: MessageWriter<Died>,
+    owners: Query<&Player>,
 ) {
     for FromClient { client_id, message } in shots.read() {
         let Some(shooter) = find_player(*client_id, &clients) else {
             continue;
         };
+        let shooter_id = owners.get(shooter).map(|p| p.owner).unwrap_or(0);
         let def = message.weapon.def();
         let origin = message.origin;
         if !origin.is_finite() || message.dirs.len() > def.pellets as usize {
@@ -266,6 +307,16 @@ fn receive_fire(
         // A target killed by an earlier pellet has already respawned at full
         // health, so the rest of this blast must not touch it.
         let mut killed: Vec<Entity> = Vec::new();
+        // One `Damaged` per target per blast.
+        struct Wound {
+            target: Entity,
+            dir: Vec3,
+            point: Vec3,
+            killed: bool,
+            pos: Vec3,
+            yaw: f32,
+        }
+        let mut wounds: Vec<Wound> = Vec::new();
 
         for dir in &message.dirs {
             let Ok(dir) = Dir3::new(*dir) else {
@@ -284,14 +335,30 @@ fn receive_fire(
             {
                 flesh = true;
                 any_hit = true;
-                let head = end.y > pose.pos.y + 0.48;
+                let head = end.y > pose.pos.y + head_line(pose);
                 any_head |= head;
+                let wound = match wounds.iter().position(|w| w.target == hit.entity) {
+                    Some(i) => i,
+                    None => {
+                        wounds.push(Wound {
+                            target: hit.entity,
+                            dir: Vec3::ZERO,
+                            point: end,
+                            killed: false,
+                            pos: pose.pos,
+                            yaw: pose.yaw,
+                        });
+                        wounds.len() - 1
+                    }
+                };
+                wounds[wound].dir += dir.as_vec3();
                 let falloff = def.falloff_per_10m.powf(hit.distance / 10.0);
                 let mult = if head { def.head_mult } else { 1.0 };
                 health.0 -= def.damage * mult * falloff;
                 if health.0 <= 0.0 {
                     any_kill = true;
                     killed.push(hit.entity);
+                    wounds[wound].killed = true;
                     if is_player {
                         health.0 = MAX_HEALTH;
                         if let Ok(mut score) = scores.get_mut(hit.entity) {
@@ -310,6 +377,7 @@ fn receive_fire(
                         if let Ok((_, victim_client)) = clients.get(hit.entity) {
                             respawn(victim_client.0, &mut respawns);
                         }
+                        died.write(Died(hit.entity));
                     } else {
                         health.0 = 0.0;
                         commands.entity(hit.entity).insert((
@@ -322,6 +390,7 @@ fn receive_fire(
             fx.write(ToClients {
                 targets: SendTargets::AllExcept(*client_id),
                 message: ShotFx {
+                    shooter: shooter_id,
                     weapon: message.weapon,
                     origin,
                     end,
@@ -331,6 +400,20 @@ fn receive_fire(
             });
         }
 
+        for wound in wounds {
+            damaged.write(ToClients {
+                targets: SendTargets::All,
+                message: Damaged {
+                    target: wound.target,
+                    dir: wound.dir.normalize_or_zero(),
+                    point: wound.point,
+                    weapon: message.weapon,
+                    killed: wound.killed,
+                    pos: wound.pos,
+                    yaw: wound.yaw,
+                },
+            });
+        }
         if any_hit {
             confirm.write(ToClients {
                 targets: SendTargets::Single(*client_id),
@@ -369,17 +452,30 @@ fn respawn(client: ClientId, respawns: &mut MessageWriter<ToClients<Respawn>>) {
 fn receive_suicide(
     mut requests: MessageReader<FromClient<Suicide>>,
     clients: Query<(Entity, &PlayerClient)>,
-    mut players: Query<(&mut Health, &mut Score, &PlayerName)>,
+    mut players: Query<(&mut Health, &mut Score, &PlayerName, &Pose, &Loadout)>,
     mut respawns: MessageWriter<ToClients<Respawn>>,
     mut feed: MessageWriter<ToClients<Feed>>,
+    mut damaged: MessageWriter<ToClients<Damaged>>,
 ) {
     for FromClient { client_id, .. } in requests.read() {
         let Some(entity) = find_player(*client_id, &clients) else {
             continue;
         };
-        let Ok((mut health, mut score, name)) = players.get_mut(entity) else {
+        let Ok((mut health, mut score, name, pose, loadout)) = players.get_mut(entity) else {
             continue;
         };
+        damaged.write(ToClients {
+            targets: SendTargets::All,
+            message: Damaged {
+                target: entity,
+                dir: Vec3::ZERO,
+                point: pose.pos,
+                weapon: loadout.0,
+                killed: true,
+                pos: pose.pos,
+                yaw: pose.yaw,
+            },
+        });
         health.0 = MAX_HEALTH;
         score.deaths += 1;
         feed.write(ToClients {

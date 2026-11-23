@@ -1,8 +1,8 @@
 //! The character you drive on this machine, plus how everyone else looks.
 //!
 //! Movement is client-side (bevy_ahoy's kinematic controller); the result is
-//! streamed to the server as a [`MoveInput`]. Other players and the dummies
-//! are replicated entities that get low-poly bodies attached here.
+//! streamed to the server as a [`MoveInput`]. Other players' bodies live in
+//! `avatar`; the practice dummies are dressed here.
 
 use avian3d::prelude::*;
 use bevy::{
@@ -19,9 +19,9 @@ use crate::{
     Layer,
     console::{Console, ConsoleAppExt, ConsoleCommand, Print, SaveSetting},
     lowpoly,
-    net::{Downed, Dummy, LocalId, MoveInput, Player, Pose, Respawn, Suicide},
+    net::{Damaged, Downed, Dummy, MoveInput, Player, Pose, Respawn, Suicide},
     render::{self, DEFAULT_FOV, Sky, WorldCamera},
-    weapon::{self, Zoom},
+    weapon::{Arsenal, Zoom},
 };
 
 const DEFAULT_SENS: f32 = 0.07;
@@ -50,7 +50,6 @@ pub(super) fn plugin(app: &mut App) {
                 pose_dummies,
             ),
         )
-        .add_observer(dress_player)
         .add_observer(dress_dummy);
 
     app.console_command("sens", "<value>", "mouse sensitivity (default 0.07)")
@@ -251,16 +250,24 @@ pub fn yaw_pitch(rotation: Quat) -> (f32, f32) {
 }
 
 fn send_move(
-    player: Single<&Transform, With<LocalPlayer>>,
+    player: Single<(&Transform, &LinearVelocity, &CharacterControllerState), With<LocalPlayer>>,
     camera: Single<&Transform, With<ViewRig>>,
+    arsenal: Res<Arsenal>,
     mut moves: MessageWriter<MoveInput>,
 ) {
+    let (transform, velocity, state) = *player;
     let (yaw, pitch) = yaw_pitch(camera.rotation);
-    moves.write(MoveInput(Pose {
-        pos: player.translation,
+    let mut pose = Pose {
+        pos: transform.translation,
         yaw,
         pitch,
-    }));
+        vel: velocity.0,
+        flags: 0,
+    };
+    pose.set(Pose::CROUCH, state.crouching);
+    pose.set(Pose::AIR, state.grounded.is_none());
+    pose.set(Pose::RELOAD, arsenal.reloading > 0.0);
+    moves.write(MoveInput(pose));
 }
 
 fn apply_respawn(
@@ -347,22 +354,17 @@ fn player_commands(
 }
 
 // ---------------------------------------------------------------------------
-// Bodies for other players and the dummies
+// Practice dummies
 // ---------------------------------------------------------------------------
-
-#[derive(Component)]
-struct HeadPivot;
 
 #[derive(Component)]
 struct DummyPivot;
 
-pub fn player_color(owner: u64) -> Color {
-    let hue = if owner == 0 {
-        24.0
-    } else {
-        (owner.wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 40) as f32 % 360.0
-    };
-    Color::hsl(hue, 0.65, 0.5)
+/// A dummy rocking on its post after being hit: (pitch, roll), a damped spring.
+#[derive(Component, Default)]
+struct Wobble {
+    angle: Vec2,
+    velocity: Vec2,
 }
 
 fn part(meshes: &mut Assets<Mesh>, size: Vec3, color: Color, rng: &mut StdRng) -> Mesh3d {
@@ -372,65 +374,6 @@ fn part(meshes: &mut Assets<Mesh>, size: Vec3, color: Color, rng: &mut StdRng) -
         0.08,
         rng,
     )))
-}
-
-fn dress_player(
-    add: On<Add<Player>>,
-    players: Query<&Player>,
-    local: Res<LocalId>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let Ok(player) = players.get(add.entity) else {
-        return;
-    };
-    if player.owner == local.0 {
-        return;
-    }
-    let mut rng = StdRng::seed_from_u64(player.owner);
-    let color = player_color(player.owner);
-    let dark = Color::srgb(0.08, 0.08, 0.1);
-    let base = materials.add(StandardMaterial {
-        perceptual_roughness: 0.85,
-        ..default()
-    });
-    let visor = materials.add(StandardMaterial {
-        base_color: color,
-        emissive: color.to_linear() * 8.0,
-        ..default()
-    });
-    let mat = MeshMaterial3d(base);
-
-    let legs = part(&mut meshes, Vec3::new(0.42, 0.8, 0.26), dark, &mut rng);
-    let torso = part(&mut meshes, Vec3::new(0.6, 0.66, 0.34), color, &mut rng);
-    let head = part(
-        &mut meshes,
-        Vec3::new(0.34, 0.34, 0.34),
-        color.darker(0.12),
-        &mut rng,
-    );
-    let visor_mesh = Mesh3d(meshes.add(Cuboid::new(0.28, 0.08, 0.04)));
-
-    commands.entity(add.entity).with_children(|body| {
-        body.spawn((legs, mat.clone(), Transform::from_xyz(0.0, -0.5, 0.0)));
-        body.spawn((torso, mat.clone(), Transform::from_xyz(0.0, 0.2, 0.0)));
-        body.spawn((
-            HeadPivot,
-            Transform::from_xyz(0.0, 0.55, 0.0),
-            Visibility::default(),
-        ))
-        .with_children(|pivot| {
-            pivot.spawn((head, mat.clone(), Transform::from_xyz(0.0, 0.17, 0.0)));
-            pivot.spawn((
-                visor_mesh,
-                MeshMaterial3d(visor),
-                Transform::from_xyz(0.0, 0.2, -0.17),
-                render::no_shadow(),
-            ));
-            weapon::spawn_avatar_guns(pivot, &mut meshes, &mat, &mut rng);
-        });
-    });
 }
 
 fn dress_dummy(
@@ -466,38 +409,37 @@ fn dress_dummy(
     let arm = part(&mut meshes, Vec3::new(0.9, 0.1, 0.1), wood, &mut rng);
 
     // Pivot at the feet so a downed dummy tips over backward.
-    commands.entity(add.entity).with_children(|root| {
-        root.spawn((
-            DummyPivot,
-            Transform::from_xyz(0.0, -0.95, 0.0),
-            Visibility::default(),
-        ))
-        .with_children(|pivot| {
-            pivot.spawn((post, base.clone(), Transform::from_xyz(0.0, 0.5, 0.0)));
-            pivot.spawn((body, base.clone(), Transform::from_xyz(0.0, 1.2, 0.0)));
-            pivot.spawn((arm, base.clone(), Transform::from_xyz(0.0, 1.35, 0.0)));
-            pivot.spawn((head, base.clone(), Transform::from_xyz(0.0, 1.72, 0.0)));
-            pivot.spawn((
-                bullseye,
-                base.clone(),
-                Transform::from_xyz(0.0, 1.2, -0.16)
-                    .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-            ));
+    commands
+        .entity(add.entity)
+        .insert(Wobble::default())
+        .with_children(|root| {
+            root.spawn((
+                DummyPivot,
+                Transform::from_xyz(0.0, -0.95, 0.0),
+                Visibility::default(),
+            ))
+            .with_children(|pivot| {
+                pivot.spawn((post, base.clone(), Transform::from_xyz(0.0, 0.5, 0.0)));
+                pivot.spawn((body, base.clone(), Transform::from_xyz(0.0, 1.2, 0.0)));
+                pivot.spawn((arm, base.clone(), Transform::from_xyz(0.0, 1.35, 0.0)));
+                pivot.spawn((head, base.clone(), Transform::from_xyz(0.0, 1.72, 0.0)));
+                pivot.spawn((
+                    bullseye,
+                    base.clone(),
+                    Transform::from_xyz(0.0, 1.2, -0.16)
+                        .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+                ));
+            });
         });
-    });
 }
 
 /// Replicated poses arrive at the server tick rate; ease toward them.
-fn smooth_remote(
+pub fn smooth_remote(
     time: Res<Time>,
-    mut remotes: Query<
-        (&Pose, &mut Transform, Option<&Children>),
-        (With<Remote>, Or<(With<Player>, With<Dummy>)>),
-    >,
-    mut pivots: Query<&mut Transform, (With<HeadPivot>, Without<Pose>)>,
+    mut remotes: Query<(&Pose, &mut Transform), (With<Remote>, Or<(With<Player>, With<Dummy>)>)>,
 ) {
     let dt = time.delta_secs();
-    for (pose, mut transform, children) in &mut remotes {
+    for (pose, mut transform) in &mut remotes {
         let target_rot = Quat::from_rotation_y(pose.yaw);
         if transform.translation.distance(pose.pos) > 4.0 {
             transform.translation = pose.pos;
@@ -506,40 +448,43 @@ fn smooth_remote(
             transform.translation.smooth_nudge(&pose.pos, 18.0, dt);
             transform.rotation.smooth_nudge(&target_rot, 18.0, dt);
         }
-        for child in children.into_iter().flatten() {
-            if let Ok(mut pivot) = pivots.get_mut(*child) {
-                pivot.rotation = Quat::from_rotation_x(pose.pitch);
-            }
-        }
     }
 }
 
-/// Tip downed dummies over. Also aims heads on the host, where players aren't `Remote`.
+/// Tip downed dummies over, and rock standing ones when they're hit.
 fn pose_dummies(
     time: Res<Time>,
-    dummies: Query<(Has<Downed>, &Children), With<Dummy>>,
-    players: Query<(&Pose, &Children), (With<Player>, Without<Remote>)>,
+    mut hits: MessageReader<Damaged>,
+    mut dummies: Query<(&Pose, Has<Downed>, &Children, &mut Wobble), With<Dummy>>,
     mut pivots: Query<&mut Transform, With<DummyPivot>>,
-    mut heads: Query<&mut Transform, (With<HeadPivot>, Without<DummyPivot>)>,
 ) {
-    let dt = time.delta_secs();
-    for (downed, children) in &dummies {
-        let target = if downed {
-            Quat::from_rotation_x(1.35)
-        } else {
-            Quat::IDENTITY
-        };
-        for child in children {
-            if let Ok(mut pivot) = pivots.get_mut(*child) {
-                let rate = if downed { 14.0 } else { 6.0 };
-                pivot.rotation.smooth_nudge(&target, rate, dt);
-            }
+    for hit in hits.read() {
+        if let Ok((pose, _, _, mut wobble)) = dummies.get_mut(hit.target) {
+            let local = Quat::from_rotation_y(-pose.yaw) * hit.dir;
+            wobble.velocity += Vec2::new(local.z, -local.x) * 3.0;
         }
     }
-    for (pose, children) in &players {
+    let dt = time.delta_secs().min(1.0 / 30.0);
+    for (_, downed, children, mut wobble) in &mut dummies {
+        let w = &mut *wobble;
+        let accel = -90.0 * w.angle - 5.0 * w.velocity;
+        w.velocity += accel * dt;
+        w.angle += w.velocity * dt;
+        let rock = Quat::from_rotation_x(w.angle.x) * Quat::from_rotation_z(w.angle.y);
         for child in children {
-            if let Ok(mut head) = heads.get_mut(*child) {
-                head.rotation = Quat::from_rotation_x(pose.pitch);
+            if let Ok(mut pivot) = pivots.get_mut(*child) {
+                if downed {
+                    pivot
+                        .rotation
+                        .smooth_nudge(&Quat::from_rotation_x(1.35), 14.0, dt);
+                } else {
+                    let upright = pivot.rotation.angle_between(Quat::IDENTITY) < 0.3;
+                    if upright {
+                        pivot.rotation = rock;
+                    } else {
+                        pivot.rotation.smooth_nudge(&Quat::IDENTITY, 6.0, dt);
+                    }
+                }
             }
         }
     }

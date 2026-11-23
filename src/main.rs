@@ -4,6 +4,8 @@
 //! commands too, Quake style: `fast-fps +name alice +host` or
 //! `fast-fps +connect 192.168.1.20`.
 
+mod avatar;
+mod bot;
 mod console;
 mod debug;
 mod game;
@@ -57,6 +59,8 @@ fn main() -> AppExit {
             weapon::plugin,
             hud::plugin,
             debug::plugin,
+            avatar::plugin,
+            bot::plugin,
         ))
         .run()
 }
@@ -71,4 +75,6 @@ pub enum Layer {
     LocalBody,
     /// Server-side player and dummy hitboxes.
     Hitbox,
+    /// Corpses: collide with the world only, and never stop bullets or players.
+    Ragdoll,
 }
