@@ -16,7 +16,7 @@ use crate::{
     lowpoly,
     physics::Layer,
     world::{
-        builder::{Builder, STONE, STONE_DARK, WOOD, WOOD_DARK},
+        builder::{Builder, Footprint, STONE, STONE_DARK, WOOD, WOOD_DARK},
         lights::{campfire, fireflies, lamp},
     },
 };
@@ -81,6 +81,7 @@ pub fn spawn_level(
         material,
         rng: StdRng::seed_from_u64(0xF0C5),
         paint: StdRng::seed_from_u64(0xC0FFEE),
+        taken: Vec::new(),
     };
 
     // ---- Things you can collide with (layout) ------------------------------
@@ -104,6 +105,9 @@ pub fn spawn_level(
         let mesh = Cylinder::new(0.6, 4.0).mesh().resolution(8).build();
         let mesh = lowpoly::mossy(mesh, STONE, &mut b.paint);
         let rotation = Quat::from_rotation_y(yaw) * Quat::from_rotation_z(FRAC_PI_2);
+        // It lies along its own x axis once tipped over.
+        b.taken
+            .push(Footprint::new(at, Vec3::new(4.0, 1.2, 1.2), yaw));
         b.solid(
             mesh,
             Transform::from_translation(at).with_rotation(rotation),
@@ -154,8 +158,9 @@ pub fn spawn_level(
             b.rng.random_range(0.5..1.3),
             b.rng.random_range(0.7..1.8),
         );
-        b.rock(at + Vec3::Y * size.y * 0.25, size);
-        placed += 1;
+        if b.rock(at + Vec3::Y * size.y * 0.25, size) {
+            placed += 1;
+        }
     }
 
     // A few pines inside the walls.
@@ -170,8 +175,9 @@ pub fn spawn_level(
             continue;
         }
         let height = b.rng.random_range(5.0..8.0);
-        b.pine(at, height, true);
-        pines.push(at);
+        if b.pine(at, height, true) {
+            pines.push(at);
+        }
     }
 
     // Lamps.

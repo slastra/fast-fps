@@ -76,6 +76,11 @@ The map is `spawn_level` in `src/world/arena.rs`. It is built from helpers on th
 | `b.bush(at, size)` | Scenery without collision. |
 | `lamp(&mut b, at, lantern, shadows)`, `campfire(&mut b, at, flame)` | Lights (`world/lights.rs`). |
 
+Blocks, crates, barrels, rocks, pillars and pines remember the ground they take up, and
+crates, barrels, rocks and pines won't be placed where something already is. So order matters:
+build structures first, then scatter things around them. If you add something solid with
+`b.solid` directly, add its `Footprint` to `b.taken` too.
+
 New shapes go in `src/lowpoly.rs`: build a mesh, color it with `facet` or `block`, and add a
 builder helper that spawns it with a collider.
 
