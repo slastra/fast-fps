@@ -8,6 +8,7 @@
 
 use bevy::{
     anti_alias::{fxaa::Fxaa, smaa::Smaa, taa::TemporalAntiAliasing},
+    asset::LoadState,
     camera::{Exposure, Hdr},
     core_pipeline::tonemapping::Tonemapping,
     light::{NotShadowCaster, ShadowFilteringMethod, Skybox},
@@ -16,12 +17,15 @@ use bevy::{
     prelude::*,
 };
 
+use crate::console::{Print, ScriptHold};
+
 use crate::config::DEFAULT_FOV;
 
 pub(super) fn plugin(app: &mut App) {
     app.insert_resource(GlobalAmbientLight::NONE)
         .insert_resource(ClearColor(Color::srgb_u8(12, 8, 18)))
-        .add_systems(PreStartup, load_sky);
+        .add_systems(PreStartup, load_sky)
+        .add_systems(Update, release_when_loaded);
 }
 
 #[derive(Resource)]
@@ -30,11 +34,40 @@ pub struct Sky {
     specular: Handle<Image>,
 }
 
-fn load_sky(mut commands: Commands, assets: Res<AssetServer>) {
+fn load_sky(mut commands: Commands, assets: Res<AssetServer>, mut hold: ResMut<ScriptHold>) {
+    // Scripts (and their screenshots) wait for the sky.
+    hold.0 += 1;
     commands.insert_resource(Sky {
         diffuse: assets.load("cubemaps/NightSkyHDRI001_4K-HDR_diffuse.ktx2"),
         specular: assets.load("cubemaps/NightSkyHDRI001_4K-HDR_specular.ktx2"),
     });
+}
+
+fn release_when_loaded(
+    sky: Res<Sky>,
+    assets: Res<AssetServer>,
+    mut hold: ResMut<ScriptHold>,
+    mut print: MessageWriter<Print>,
+    mut done: Local<bool>,
+) {
+    if *done {
+        return;
+    }
+    let handles = [&sky.diffuse, &sky.specular];
+    let failed = handles
+        .iter()
+        .any(|h| matches!(assets.load_state(h.id()), LoadState::Failed(_)));
+    if failed {
+        print.write(Print::error("could not load the sky cubemaps from assets/"));
+    }
+    if failed
+        || handles
+            .iter()
+            .all(|h| assets.is_loaded_with_dependencies(h.id()))
+    {
+        *done = true;
+        hold.0 = hold.0.saturating_sub(1);
+    }
 }
 
 /// Marker for the player's camera.

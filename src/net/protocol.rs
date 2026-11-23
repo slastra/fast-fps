@@ -41,6 +41,15 @@ pub struct Player {
     pub owner: u64,
 }
 
+impl Player {
+    /// `owner` ids for practice bots start here, clear of real client ids.
+    pub const BOT_OWNER: u64 = 0xB07_0000;
+
+    pub fn is_bot(&self) -> bool {
+        (Self::BOT_OWNER..Self::BOT_OWNER + 0x1_0000).contains(&self.owner)
+    }
+}
+
 #[derive(Component, Serialize, Deserialize, Clone, Debug)]
 pub struct PlayerName(pub String);
 

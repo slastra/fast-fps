@@ -1,5 +1,15 @@
 //! Running console lines that weren't typed: launch arguments (`+host`),
-//! the saved settings file, and `exec` scripts with `wait`.
+//! the saved settings file, and `exec` scripts.
+//!
+//! Scripts are what the test harness drives the game with, so they are built
+//! to behave the same on a fast desktop and a slow laptop:
+//!
+//! - Nothing runs until the game has loaded and drawn a few frames.
+//! - One line runs per frame, so a line always sees the result of the one
+//!   before it (spawn a bot, then order it).
+//! - `wait` counts game time, not wall-clock time.
+//! - Work that finishes later, like saving a screenshot, takes a
+//!   [`ScriptHold`] and the script pauses until it is released.
 
 use bevy::prelude::*;
 
@@ -50,40 +60,58 @@ pub fn queue_launch_commands(
     }
 }
 
-/// Parse queued lines (`;` separates commands) and emit them as messages.
-/// Script lines run until a `wait` pauses them.
-pub fn run_queued(
-    time: Res<Time<Real>>,
+/// Frames drawn before the first script line runs, so shaders are compiled
+/// and the first screenshot isn't of a half-built scene.
+const WARMUP_FRAMES: u32 = 30;
+
+/// Reasons the script can't continue yet. Add one when you start something
+/// the next line depends on (loading an asset, saving a screenshot) and
+/// subtract it when that finishes.
+#[derive(Resource, Default)]
+pub struct ScriptHold(pub u32);
+
+/// Run typed lines at once and the next script line when it is due.
+pub fn run_script(
+    time: Res<Time>,
+    hold: Res<ScriptHold>,
     mut console: ResMut<Console>,
     registry: Res<CommandRegistry>,
     mut commands: MessageWriter<ConsoleCommand>,
     mut print: MessageWriter<Print>,
+    mut frames: Local<u32>,
 ) {
     let mut lines: Vec<String> = std::mem::take(&mut console.queued);
+
+    *frames += 1;
     console.wait -= time.delta_secs();
-    while console.wait <= 0.0 {
-        let Some(line) = console.script.pop_front() else {
-            break;
-        };
-        let mut words = line.split_whitespace();
-        match words.next() {
-            Some("wait") => {
-                console.wait = words.next().and_then(|w| w.parse().ok()).unwrap_or(1.0);
+    if *frames > WARMUP_FRAMES && hold.0 == 0 && console.wait <= 0.0 {
+        while let Some(line) = console.script.pop_front() {
+            let text = line.trim();
+            if text.is_empty() || text.starts_with("//") || text.starts_with('#') {
+                continue;
             }
-            Some("screenshot") => {
-                // Let the capture finish before the script changes anything else.
+            let mut words = text.split_whitespace();
+            if words.next() == Some("wait") {
+                match words.next().and_then(|w| w.parse::<f32>().ok()) {
+                    Some(seconds) => console.wait = seconds,
+                    None => {
+                        print.write(Print::error("usage: wait <seconds>"));
+                    }
+                }
+            } else {
                 lines.push(line);
-                console.wait = 0.2;
             }
-            _ => lines.push(line),
+            break;
         }
     }
+
     for line in lines {
         let line = line.trim();
         if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
             continue;
         }
         print.write(Print(format!("] {line}")));
+        // `;` puts several commands on one line, and so in one frame.
         for part in line.split(';') {
             let mut words = part.split_whitespace().map(str::to_string);
             let Some(name) = words.next() else { continue };
@@ -98,20 +126,22 @@ pub fn run_queued(
                         }
                     }
                     Some(Err(e)) => {
-                        print.write(Print(format!("exec: {e}")));
+                        print.write(Print::error(format!("exec {}: {e}", args[0])));
                     }
                     None => {
-                        print.write(Print::new("usage: exec <file>"));
+                        print.write(Print::error("usage: exec <file>"));
                     }
                 },
                 "wait" => {
-                    print.write(Print::new("wait only works inside an exec script"));
+                    print.write(Print::error("wait only works inside a script"));
                 }
                 _ if registry.0.contains_key(name.as_str()) => {
                     commands.write(ConsoleCommand { name, args });
                 }
                 _ => {
-                    print.write(Print(format!("unknown command '{name}', try 'help'")));
+                    print.write(Print::error(format!(
+                        "unknown command '{name}', try 'help'"
+                    )));
                 }
             }
         }

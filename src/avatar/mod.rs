@@ -13,6 +13,8 @@ mod ik;
 mod ragdoll;
 pub mod rig;
 
+pub use ragdoll::Ragdoll;
+
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 

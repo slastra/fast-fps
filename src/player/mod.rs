@@ -11,7 +11,7 @@ mod input;
 mod view;
 
 pub use input::GameInput;
-pub use view::ViewRig;
+pub use view::{ViewRig, ViewSettings};
 
 use avian3d::prelude::*;
 use bevy::prelude::*;

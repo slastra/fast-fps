@@ -1,0 +1,10 @@
+# The scenarios scripts/check.sh runs. One per line: arguments to harness.sh.
+# Lines run in order, each as its own run.
+tests/harness/smoke.cfg
+tests/harness/spray.cfg
+-t 150 tests/harness/ragdoll.cfg
+tests/harness/anim.cfg
+tests/harness/artifacts.cfg
+tests/harness/lan_host.cfg tests/harness/lan_client.cfg
+-c target/harness/settings tests/harness/settings_save.cfg
+-c target/harness/settings tests/harness/settings_load.cfg

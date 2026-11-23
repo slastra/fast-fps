@@ -24,8 +24,6 @@ use crate::{
     weapon::WeaponKind,
 };
 
-/// `Player::owner` ids for bots start here, clear of real client ids.
-const BOT_OWNER: u64 = 0xB07_0000;
 const JUMP_SPEED: f32 = 8.4;
 const EYE: f32 = 0.8;
 
@@ -96,7 +94,7 @@ fn bot_commands(
             continue;
         }
         if *state.get() != ClientState::Disconnected {
-            print.write(Print::new("bots only work when hosting or offline"));
+            print.write(Print::error("bots only work when hosting or offline"));
             continue;
         }
         if cmd.name == "bot" {
@@ -120,7 +118,7 @@ fn bot_commands(
             commands.spawn((
                 Replicated,
                 Player {
-                    owner: BOT_OWNER + id as u64,
+                    owner: Player::BOT_OWNER + id as u64,
                 },
                 PlayerName(format!("bot{id}")),
                 Health(MAX_HEALTH),
@@ -155,12 +153,12 @@ fn bot_commands(
         }
 
         let (Some(who), Some(order)) = (cmd.arg(0), cmd.arg(1)) else {
-            print.write(Print::new("usage: bot_do <id|all> <order> [arg]"));
+            print.write(Print::error("usage: bot_do <id|all> <order> [arg]"));
             continue;
         };
         let id: Option<u32> = who.parse().ok();
         if id.is_none() && who != "all" {
-            print.write(Print::new("usage: bot_do <id|all> <order> [arg]"));
+            print.write(Print::error("usage: bot_do <id|all> <order> [arg]"));
             continue;
         }
         let arg = cmd.arg(2);
@@ -200,12 +198,12 @@ fn bot_commands(
                 },
                 "remove" => commands.entity(entity).despawn(),
                 _ => {
-                    print.write(Print(format!("unknown bot order '{order}'")));
+                    print.write(Print::error(format!("unknown bot order '{order}'")));
                 }
             }
         }
         if !matched {
-            print.write(Print(format!("no bot '{who}'")));
+            print.write(Print::error(format!("no bot '{who}'")));
         }
     }
 }

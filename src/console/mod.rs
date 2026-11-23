@@ -13,6 +13,7 @@ mod script;
 mod settings;
 mod ui;
 
+pub use script::ScriptHold;
 pub use settings::SaveSetting;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -26,7 +27,7 @@ use bevy::{
 };
 
 use crate::console::{
-    script::{queue_launch_commands, run_queued},
+    script::{queue_launch_commands, run_script},
     settings::{Settings, save_settings},
     ui::{render_console, spawn_console_ui},
 };
@@ -42,11 +43,16 @@ pub(super) fn plugin(app: &mut App) {
         .add_message::<SaveSetting>()
         .init_resource::<Settings>()
         .add_systems(Startup, (spawn_console_ui, queue_launch_commands))
+        .init_resource::<ScriptHold>()
+        // Commands are issued in PreUpdate so every handler, in any module,
+        // sees them during Update of the same frame.
         .add_systems(
             PreUpdate,
-            (toggle_console, edit_input).chain().after(InputSystems),
+            (toggle_console, edit_input, run_script)
+                .chain()
+                .after(InputSystems),
         )
-        .add_systems(Update, (run_queued, builtin_commands))
+        .add_systems(Update, builtin_commands)
         .add_systems(
             PostUpdate,
             (collect_prints, render_console, save_settings).chain(),
@@ -57,7 +63,7 @@ pub(super) fn plugin(app: &mut App) {
         .console_command("quit", "", "exit the game")
         .console_command("echo", "<text>", "print text")
         .console_command("exec", "<file>", "run a script of console commands")
-        .console_command("wait", "<seconds>", "pause a script");
+        .console_command("wait", "<seconds>", "pause a script (game time)");
 }
 
 /// A parsed console command, emitted for every line the user submits.
@@ -80,6 +86,12 @@ pub struct Print(pub String);
 impl Print {
     pub fn new(text: impl Into<String>) -> Self {
         Self(text.into())
+    }
+
+    /// A problem with a command. The `error:` prefix is what the test
+    /// harness looks for, so use this for anything a script should fail on.
+    pub fn error(text: impl std::fmt::Display) -> Self {
+        Self(format!("error: {text}"))
     }
 }
 

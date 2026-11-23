@@ -145,7 +145,7 @@ pub fn weapon_commands(
                 }
             }
             None => {
-                print.write(Print::new("usage: weapon <ak|mp5|glock|shotgun|sniper>"));
+                print.write(Print::error("usage: weapon <ak|mp5|glock|shotgun|sniper>"));
             }
         }
     }

@@ -20,24 +20,34 @@ mod weapon;
 mod world;
 
 use avian3d::prelude::*;
-use bevy::{prelude::*, window::PresentMode};
+use bevy::{prelude::*, render::RenderPlugin, window::PresentMode};
 use bevy_ahoy::prelude::*;
 use bevy_enhanced_input::prelude::*;
 use bevy_replicon::prelude::*;
 use bevy_replicon_renet::RepliconRenetPlugins;
 
 fn main() -> AppExit {
+    // Set by scripts/harness.sh. Shaders then compile before the frame that
+    // needs them is drawn, so a test screenshot never catches a half-drawn
+    // scene. Normal play compiles them in the background instead.
+    let under_test = std::env::var_os("HARNESS").is_some();
+
     App::new()
         .add_plugins(
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Window {
-                    title: config::GAME_NAME.to_string(),
-                    present_mode: PresentMode::AutoNoVsync,
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Window {
+                        title: config::GAME_NAME.to_string(),
+                        present_mode: PresentMode::AutoNoVsync,
+                        ..default()
+                    }
+                    .into(),
                     ..default()
-                }
-                .into(),
-                ..default()
-            }),
+                })
+                .set(RenderPlugin {
+                    synchronous_pipeline_compilation: under_test,
+                    ..default()
+                }),
         )
         .add_plugins((
             PhysicsPlugins::default(),

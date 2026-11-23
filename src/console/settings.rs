@@ -52,6 +52,9 @@ pub fn save_settings(
         .unwrap_or(Ok(()))
         .and_then(|()| std::fs::write(&path, text));
     if let Err(e) = result {
-        print.write(Print(format!("could not save {}: {e}", path.display())));
+        print.write(Print::error(format!(
+            "could not save {}: {e}",
+            path.display()
+        )));
     }
 }

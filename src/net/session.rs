@@ -101,11 +101,11 @@ pub fn net_commands(
         match cmd.name.as_str() {
             "host" => {
                 if server.is_some() {
-                    print.write(Print::new("already hosting"));
+                    print.write(Print::error("already hosting"));
                     continue;
                 }
                 if client.is_some() {
-                    print.write(Print::new("disconnect first"));
+                    print.write(Print::error("disconnect first"));
                     continue;
                 }
                 let port = cmd
@@ -122,17 +122,17 @@ pub fn net_commands(
                         )));
                     }
                     Err(e) => {
-                        print.write(Print(format!("could not host: {e}")));
+                        print.write(Print::error(format!("could not host: {e}")));
                     }
                 }
             }
             "connect" => {
                 if server.is_some() {
-                    print.write(Print::new("stop hosting first ('disconnect')"));
+                    print.write(Print::error("stop hosting first ('disconnect')"));
                     continue;
                 }
                 if client.is_some() {
-                    print.write(Print::new("already connected; 'disconnect' first"));
+                    print.write(Print::error("already connected; 'disconnect' first"));
                     continue;
                 }
                 let Some(target) = cmd.arg(0) else {
@@ -143,7 +143,7 @@ pub fn net_commands(
                 let addr = match resolve(target) {
                     Ok(addr) => addr,
                     Err(e) => {
-                        print.write(Print(format!("bad address '{target}': {e}")));
+                        print.write(Print::error(format!("bad address '{target}': {e}")));
                         continue;
                     }
                 };
@@ -153,7 +153,7 @@ pub fn net_commands(
                         print.write(Print(format!("connecting to {addr}...")));
                     }
                     Err(e) => {
-                        print.write(Print(format!("could not connect: {e}")));
+                        print.write(Print::error(format!("could not connect: {e}")));
                     }
                 }
             }
@@ -172,7 +172,7 @@ pub fn net_commands(
                     commands.remove_resource::<Beacon>();
                     print.write(Print::new("stopped hosting"));
                 } else {
-                    print.write(Print::new("not connected"));
+                    print.write(Print::error("not connected"));
                 }
             }
             "find" => {

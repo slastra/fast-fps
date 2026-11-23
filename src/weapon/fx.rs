@@ -56,8 +56,9 @@ struct Spark {
     life: f32,
 }
 
+/// A bullet hole; the number is how long it has left.
 #[derive(Component)]
-struct Decal(f32);
+pub struct Decal(f32);
 
 /// One-shot muzzle flash light for other players' shots.
 #[derive(Component)]
