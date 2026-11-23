@@ -82,6 +82,7 @@ pub fn spawn_level(
         rng: StdRng::seed_from_u64(0xF0C5),
         paint: StdRng::seed_from_u64(0xC0FFEE),
         taken: Vec::new(),
+        batches: default(),
     };
 
     // ---- Things you can collide with (layout) ------------------------------
@@ -251,6 +252,9 @@ pub fn spawn_level(
         })
         .collect();
     fireflies(&mut b, firefly, &homes);
+
+    // Merge all the static pieces into one mesh per area.
+    b.finish();
 }
 
 /// The open yard south of the keep. Nothing is placed here: it keeps the
@@ -301,7 +305,7 @@ fn terrain(b: &mut Builder) {
         let height = (c.y / 14.0).clamp(0.0, 1.0);
         lowpoly::shade(ground.mix(&cliff, height), 0.13, rng)
     });
-    b.mesh(mesh, Transform::default());
+    b.single(mesh, Transform::default());
     // The playable floor is flat, so a slab is all physics needs.
     b.commands.spawn((
         RigidBody::Static,
@@ -331,7 +335,7 @@ fn ground_cover(b: &mut Builder) {
             }
         }
         let mesh = lowpoly::grass(&spots, &mut b.paint);
-        b.mesh(mesh, Transform::default()).insert(NotShadowCaster);
+        b.single(mesh, Transform::default()).insert(NotShadowCaster);
     }
 
     let mut pebbles = Vec::new();
@@ -349,7 +353,7 @@ fn ground_cover(b: &mut Builder) {
         pebbles.push(lowpoly::facet(stone, color, 0.2, &mut b.paint));
     }
     let mesh = lowpoly::merge(pebbles);
-    b.mesh(mesh, Transform::default()).insert(NotShadowCaster);
+    b.single(mesh, Transform::default()).insert(NotShadowCaster);
 }
 
 fn perimeter(b: &mut Builder) {

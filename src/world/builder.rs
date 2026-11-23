@@ -1,6 +1,14 @@
-//! Building blocks for levels. Each helper spawns a mesh and, unless it says
+//! Building blocks for levels. Each helper adds a mesh and, unless it says
 //! otherwise, a matching collider. Color is baked into the mesh, so
 //! everything shares one material.
+//!
+//! **Meshes are merged.** The level is hundreds of small pieces, and every
+//! view the renderer draws (the screen, and each shadow-casting light, six
+//! times over) has to consider each separate piece. So pieces don't become
+//! entities of their own: they are collected per area and merged into one
+//! mesh each when [`Builder::finish`] runs. Colliders stay separate,
+//! invisible entities. Use [`Builder::single`] for something that must stay
+//! its own entity.
 //!
 //! The builder carries two random number generators, and the difference
 //! matters:
@@ -9,7 +17,7 @@
 //! - `paint` decides **looks**: shading, and decoration without collision.
 //!   Use it freely; changing how much of it you use never moves the map.
 
-use std::f32::consts::TAU;
+use std::{collections::HashMap, f32::consts::TAU};
 
 use avian3d::prelude::*;
 use bevy::{light::NotShadowCaster, prelude::*};
@@ -164,11 +172,38 @@ pub struct Builder<'a, 'w, 's> {
     pub paint: StdRng,
     /// Ground already occupied by something with collision.
     pub taken: Vec<Footprint>,
+    /// Meshes waiting to be merged, by area and by whether they cast shadows.
+    pub batches: HashMap<(IVec2, bool), Vec<Mesh>>,
 }
 
+/// The side of a merged area, in meters.
+const AREA: f32 = 24.0;
+
 impl Builder<'_, '_, '_> {
-    /// A mesh with no collision.
-    pub fn mesh(&mut self, mesh: Mesh, transform: Transform) -> EntityCommands<'_> {
+    /// A mesh with no collision. It is merged with its neighbors.
+    pub fn mesh(&mut self, mesh: Mesh, transform: Transform) {
+        self.batch(mesh, transform, true);
+    }
+
+    /// Like [`Builder::mesh`], for things whose shadows wouldn't be seen.
+    pub fn mesh_without_shadow(&mut self, mesh: Mesh, transform: Transform) {
+        self.batch(mesh, transform, false);
+    }
+
+    fn batch(&mut self, mesh: Mesh, transform: Transform, shadows: bool) {
+        let mesh = mesh.transformed_by(transform);
+        let points = lowpoly::positions(&mesh);
+        if points.is_empty() {
+            return;
+        }
+        let center = points.iter().copied().sum::<Vec3>() / points.len() as f32;
+        let area = (Vec2::new(center.x, center.z) / AREA).floor().as_ivec2();
+        self.batches.entry((area, shadows)).or_default().push(mesh);
+    }
+
+    /// A mesh that stays its own entity: something huge (the terrain) or
+    /// already merged (grass).
+    pub fn single(&mut self, mesh: Mesh, transform: Transform) -> EntityCommands<'_> {
         let handle = self.meshes.add(mesh);
         self.commands.spawn((
             Mesh3d(handle),
@@ -177,13 +212,35 @@ impl Builder<'_, '_, '_> {
         ))
     }
 
-    /// A mesh with a collider.
+    /// A mesh with a collider. The mesh is merged; the collider is an
+    /// invisible entity of its own.
     pub fn solid(&mut self, mesh: Mesh, transform: Transform, collider: Collider) {
-        self.mesh(mesh, transform).insert((
+        self.mesh(mesh, transform);
+        self.commands.spawn((
             RigidBody::Static,
             collider,
             CollisionLayers::new(Layer::World, LayerMask::ALL),
+            transform,
         ));
+    }
+
+    /// Merge everything added so far into one entity per area. Call once,
+    /// after the whole level is built.
+    pub fn finish(&mut self) {
+        let mut batches: Vec<_> = self.batches.drain().collect();
+        // A stable order, so entity order doesn't change between runs.
+        batches.sort_by_key(|((area, shadows), _)| (area.x, area.y, *shadows));
+        for ((_, shadows), meshes) in batches {
+            let handle = self.meshes.add(lowpoly::merge(meshes));
+            let mut entity = self.commands.spawn((
+                Mesh3d(handle),
+                MeshMaterial3d(self.material.clone()),
+                Transform::default(),
+            ));
+            if !shadows {
+                entity.insert(NotShadowCaster);
+            }
+        }
     }
 
     /// Whether a box of `size` at `center` would be clear of everything placed
@@ -354,7 +411,7 @@ impl Builder<'_, '_, '_> {
             );
         } else {
             // The far forest is scenery; skip its shadows.
-            self.mesh(mesh, transform).insert(NotShadowCaster);
+            self.mesh_without_shadow(mesh, transform);
         }
         true
     }

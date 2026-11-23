@@ -34,6 +34,10 @@ impl Default for LampShadows {
 #[derive(Component)]
 pub struct LampLight;
 
+/// The campfire's light.
+#[derive(Component)]
+pub struct CampfireLight;
+
 /// A light that wobbles like fire.
 #[derive(Component)]
 pub struct Flicker {
@@ -88,8 +92,7 @@ pub fn lamp(b: &mut Builder, at: Vec3, lantern: Handle<StandardMaterial>) {
     .build()
     .rotated_by(Quat::from_rotation_y(TAU / 8.0));
     let cap = lowpoly::facet(cap, IRON, 0.1, &mut b.paint);
-    b.mesh(cap, Transform::from_translation(top + Vec3::Y * 0.56))
-        .insert(NotShadowCaster);
+    b.mesh_without_shadow(cap, Transform::from_translation(top + Vec3::Y * 0.56));
 
     b.commands.spawn((
         PointLight {
@@ -183,6 +186,7 @@ pub fn campfire(b: &mut Builder, at: Vec3, flame: Handle<StandardMaterial>) {
             ..default()
         },
         Transform::from_translation(at + Vec3::Y * 0.9),
+        CampfireLight,
         Flicker {
             base: 40_000.0,
             seed: 3.3,
