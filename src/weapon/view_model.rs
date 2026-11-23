@@ -33,7 +33,7 @@ pub struct MuzzleLight;
 
 /// Where each weapon's muzzle sits relative to the eye (already scaled).
 #[derive(Resource)]
-pub struct Muzzles(pub [Vec3; 5]);
+pub struct Muzzles(pub [Vec3; WeaponKind::COUNT]);
 
 pub fn build_view_models(
     mut commands: Commands,
@@ -65,7 +65,7 @@ pub fn build_view_models(
         ),
     );
 
-    let mut muzzles = [Vec3::ZERO; 5];
+    let mut muzzles = [Vec3::ZERO; WeaponKind::COUNT];
     let mut guns = Vec::new();
     for kind in WeaponKind::ALL {
         let model = super::models::model(kind);

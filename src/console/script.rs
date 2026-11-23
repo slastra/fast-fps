@@ -22,7 +22,7 @@ use crate::{
 };
 
 /// Runs `config.cfg`, then the launch arguments:
-/// `fast-fps +name alice +host 27015` runs `name alice` then `host 27015`.
+/// `+name alice +host 27015` runs `name alice` then `host 27015`.
 pub fn queue_launch_commands(
     mut console: ResMut<Console>,
     mut settings: ResMut<Settings>,

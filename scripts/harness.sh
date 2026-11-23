@@ -83,9 +83,10 @@ if ! cargo build -q; then
     echo "harness: build failed" >&2
     exit 2
 fi
-BIN=$ROOT/target/debug/$NAME
+TARGET=${CARGO_TARGET_DIR:-$ROOT/target}
+BIN=$TARGET/debug/$NAME
 # Dev builds link Bevy dynamically; `cargo run` sets this up, so we do too.
-LIBS="$ROOT/target/debug/deps:$ROOT/target/debug:$(rustc --print target-libdir)"
+LIBS="$TARGET/debug/deps:$TARGET/debug:$(rustc --print target-libdir)"
 
 RUN_DIR=$ROOT/target/harness/$(date +%Y%m%d-%H%M%S)
 [ -e "$RUN_DIR" ] && RUN_DIR=$RUN_DIR-$$

@@ -17,7 +17,10 @@ pub enum WeaponKind {
 }
 
 impl WeaponKind {
-    pub const ALL: [WeaponKind; 5] = [
+    /// How many weapons there are. Arrays indexed by weapon use this.
+    pub const COUNT: usize = 5;
+
+    pub const ALL: [WeaponKind; Self::COUNT] = [
         WeaponKind::Ak,
         WeaponKind::Mp5,
         WeaponKind::Glock,
@@ -142,7 +145,7 @@ const GLOCK_PATTERN: &[(f32, f32, f32)] = &[
     (19.0, 0.2, 2.4),
 ];
 
-const DEFS: [WeaponDef; 5] = [
+const DEFS: [WeaponDef; WeaponKind::COUNT] = [
     WeaponDef {
         name: "AK",
         interval: 0.1,

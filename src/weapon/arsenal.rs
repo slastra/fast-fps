@@ -44,11 +44,23 @@ impl PartialEq for Zoom {
     }
 }
 
+const SLOT_KEYS: [KeyCode; 9] = [
+    KeyCode::Digit1,
+    KeyCode::Digit2,
+    KeyCode::Digit3,
+    KeyCode::Digit4,
+    KeyCode::Digit5,
+    KeyCode::Digit6,
+    KeyCode::Digit7,
+    KeyCode::Digit8,
+    KeyCode::Digit9,
+];
+
 #[derive(Resource)]
 pub struct Arsenal {
     pub current: WeaponKind,
     last: WeaponKind,
-    pub ammo: [u32; 5],
+    pub ammo: [u32; WeaponKind::COUNT],
     /// Seconds of reload left for the current weapon.
     pub reloading: f32,
     /// Seconds until a freshly drawn weapon can fire.
@@ -164,23 +176,18 @@ pub fn switch_weapon(
     if !input.enabled {
         return;
     }
-    let slots = [
-        (KeyCode::Digit1, WeaponKind::Ak),
-        (KeyCode::Digit2, WeaponKind::Mp5),
-        (KeyCode::Digit3, WeaponKind::Glock),
-        (KeyCode::Digit4, WeaponKind::Shotgun),
-        (KeyCode::Digit5, WeaponKind::Sniper),
-    ];
-    let mut wanted = slots
-        .iter()
-        .find(|(key, _)| keys.just_pressed(*key))
-        .map(|(_, kind)| *kind);
+    // Number keys pick weapons in the order they are listed in `WeaponKind::ALL`.
+    let mut wanted = WeaponKind::ALL
+        .into_iter()
+        .zip(SLOT_KEYS)
+        .find(|(_, key)| keys.just_pressed(*key))
+        .map(|(kind, _)| kind);
     if keys.just_pressed(KeyCode::KeyQ) {
         wanted = Some(arsenal.last);
     }
     if scroll != 0.0 {
         let i = arsenal.current.index() as i32 + if scroll < 0.0 { 1 } else { -1 };
-        wanted = Some(WeaponKind::ALL[i.rem_euclid(5) as usize]);
+        wanted = Some(WeaponKind::ALL[i.rem_euclid(WeaponKind::COUNT as i32) as usize]);
     }
     if let Some(kind) = wanted
         && arsenal.select(kind)

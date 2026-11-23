@@ -1,8 +1,10 @@
-//! fast-fps: a small low-poly LAN shooter.
+//! A small low-poly LAN shooter, and a starting point for your own game.
 //!
 //! Everything is driven from the `~` console. Launch arguments are console
-//! commands too, Quake style: `fast-fps +name alice +host` or
-//! `fast-fps +connect 192.168.1.20`.
+//! commands too, Quake style: `cargo run -- +name alice +host` or
+//! `cargo run -- +connect 192.168.1.20`.
+//!
+//! This file only assembles the app. `docs/tour.md` maps the rest.
 
 mod avatar;
 mod config;

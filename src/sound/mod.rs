@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use bevy::{audio::Volume, prelude::*};
 
+use crate::weapon::WeaponKind;
+
 use crate::sound::synth::{Gun, click, shot, silence, tone, wav, with_action};
 
 pub(super) fn plugin(app: &mut App) {
@@ -19,7 +21,7 @@ pub(super) fn plugin(app: &mut App) {
 #[derive(Resource)]
 pub struct Sounds {
     /// One per weapon, indexed by `WeaponKind::index`.
-    pub shots: [Handle<AudioSource>; 5],
+    pub shots: [Handle<AudioSource>; WeaponKind::COUNT],
     pub zoom: Handle<AudioSource>,
     pub hit: Handle<AudioSource>,
     pub kill: Handle<AudioSource>,

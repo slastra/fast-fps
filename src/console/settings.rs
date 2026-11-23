@@ -18,7 +18,7 @@ pub struct SaveSetting {
 #[derive(Resource, Default)]
 pub struct Settings(pub BTreeMap<String, String>);
 
-/// `$XDG_CONFIG_HOME/fast-fps/config.cfg`, falling back to `~/.config`.
+/// `$XDG_CONFIG_HOME/<game name>/config.cfg`, falling back to `~/.config`.
 pub fn config_path() -> Option<std::path::PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
