@@ -1,0 +1,48 @@
+[package]
+name = "fast-fps"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+bevy = { version = "0.20.1", features = ["serialize", "ktx2", "zstd_rust", "wav"] }
+avian3d = { version = "0.8", features = ["serialize"] }
+bevy_ahoy = { version = "0.3", default-features = false }
+bevy_enhanced_input = "0.27"
+bevy_replicon = "0.45"
+bevy_replicon_renet = "0.21"
+serde = { version = "1", features = ["derive"] }
+rand = "0.9"
+tracing = { version = "0.1", features = ["max_level_debug", "release_max_level_warn"] }
+
+[features]
+default = ["dev"]
+dev = ["bevy/dynamic_linking", "bevy/file_watcher", "bevy/track_location"]
+
+[lints.clippy]
+too_many_arguments = "allow"
+type_complexity = "allow"
+nonstandard_macro_braces = "warn"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev.package.wgpu-types]
+debug-assertions = false
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
+# Optimize for build time in CI.
+[profile.ci]
+inherits = "dev"
+opt-level = 0
+debug = "line-tables-only"
+codegen-units = 4
+
+[profile.ci.package."*"]
+opt-level = 0
