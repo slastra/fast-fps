@@ -74,12 +74,18 @@ The map is `spawn_level` in `src/world/arena.rs`. It is built from helpers on th
 | `b.crate_stack(base, count)`, `b.barrel(at)` | Cover. |
 | `b.rock(at, size)`, `b.pine(at, height, collide)`, `b.pillar(at, height)` | Scenery with collision. |
 | `b.bush(at, size)` | Scenery without collision. |
-| `lamp(&mut b, at, lantern, shadows)`, `campfire(&mut b, at, flame)` | Lights (`world/lights.rs`). |
+| `lamp(&mut b, at, lantern)`, `campfire(&mut b, at, flame)` | Lights (`world/lights.rs`). The two lamps nearest the camera cast shadows. |
 
 Blocks, crates, barrels, rocks, pillars and pines remember the ground they take up, and
 crates, barrels, rocks and pines won't be placed where something already is. So order matters:
 build structures first, then scatter things around them. If you add something solid with
 `b.solid` directly, add its `Footprint` to `b.taken` too.
+
+The builder doesn't spawn a separate entity per piece. It queues meshes by area and merges
+them when `b.finish()` runs at the end of `spawn_level`, because the renderer pays for every
+separate mesh in every view it draws. Colliders stay separate. If something must stay its own
+entity (it moves, or you want to find it in a query), use `b.single` and give it its own
+collider.
 
 New shapes go in `src/lowpoly.rs`: build a mesh, color it with `facet` or `block`, and add a
 builder helper that spawns it with a collider.
@@ -96,6 +102,8 @@ scenarios use it as a stage.
 
 Check: a script that sets `sky day`, teleports to a few viewpoints and takes screenshots
 (`tests/harness/look.cfg` is a starting point). Make sure no spawn point is inside something (`state x y z` after spawning).
+Then `scripts/bench.sh` before and after, since a map change can change the frame rate (see
+`docs/perf.md`).
 
 ## Change the sky or the mood
 

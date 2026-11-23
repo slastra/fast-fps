@@ -43,7 +43,7 @@ cargo run
 
 The first build compiles the engine. On a fast desktop that is a few minutes; on a small
 laptop it can be an hour or more, and it looks stuck when it isn't. After that, changes
-rebuild quickly. If the game runs slowly, type `exec cfg/low.cfg` in the console.
+rebuild quickly. If the game runs slowly, type `r_quality low` (or `medium`) in the console.
 
 ## Usage
 
@@ -69,7 +69,8 @@ Launch arguments are console commands too: `cargo run -- +name alice +host`.
 
 ## Configuration
 
-`name`, `sens` (mouse sensitivity), `fov` and `sky` are saved when you set them in the console.
+`name`, `sens` (mouse sensitivity), `fov`, `sky` and `r_quality` (graphics: `low`, `medium` or
+`high`) are saved when you set them in the console.
 They live in `~/.config/fast-fps/config.cfg`, which is a list of console commands run at startup.
 
 Game rules are constants in the source:
@@ -146,6 +147,7 @@ scripts/check.sh             # everything, including every scripted scenario
 | [docs/tour.md](docs/tour.md) | A map of the code. |
 | [docs/recipes.md](docs/recipes.md) | Step-by-step: add a weapon, change the map, add a command, sync a value. |
 | [docs/harness.md](docs/harness.md) | The test harness: scripting the game and checking what it does. |
+| [docs/perf.md](docs/perf.md) | Measuring speed, and what each graphics setting costs. |
 
 ## Credits
 

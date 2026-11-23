@@ -64,7 +64,8 @@ src/
 
   world/         The map.
     arena.rs       The layout. Edit this to change the map.
-    builder.rs     block, trim, ramp, crate_stack, barrel, rock, bush, pine, pillar.
+    builder.rs     block, trim, ramp, crate_stack, barrel, rock, bush, pine, pillar;
+                   merges static meshes per area (finish).
     lights.rs      Lamps, the campfire, embers and fireflies.
     dummy.rs       How practice dummies look and react.
 

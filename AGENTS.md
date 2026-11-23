@@ -16,6 +16,7 @@ cargo test                        # unit tests, seconds
 scripts/check.sh --quick          # format + lint + unit tests + smoke scenario
 scripts/check.sh                  # everything, including all scripted scenarios (minutes)
 scripts/harness.sh tests/harness/smoke.cfg    # one scripted scenario
+scripts/bench.sh --release        # frame, CPU and GPU times along a fixed route
 scripts/new-game.sh ~/Projects/Rust/my-game   # start a new game from this one
 ```
 
@@ -71,6 +72,11 @@ scripts/new-game.sh ~/Projects/Rust/my-game   # start a new game from this one
   the camera or in the level, or the next `sky` change will overwrite them.
 - **One camera.** The first-person gun is drawn by the main camera, scaled toward the eye. Do
   not add a second camera for it (see Traps).
+- **Measure before and after anything that could change speed:** lights, shadows,
+  post-processing, the level, or anything spawned in numbers. Run `scripts/bench.sh
+  --release` both times and put the two tables in the commit message. `docs/perf.md` says
+  how, and what each setting costs. New expensive effects go off in the `low` and `medium`
+  presets (`r_quality`, in `src/debug/switches.rs`).
 - Keep `cargo fmt` and `cargo clippy --all-targets -- -D warnings` clean. `check.sh` enforces both.
 
 ## Traps
@@ -100,6 +106,10 @@ Each of these cost real debugging time once.
   to `sky day` first; it is the clearest light.
 - **The yard south of the keep is kept empty on purpose** (`in_yard` in `world/arena.rs`). The
   test scenarios use it as a stage; putting something there breaks them.
+- **Frame rates from the invisible harness display are rough; GPU and CPU times are not.**
+  Compare `gpu ms` and `cpu ms` between runs. Trust fps only from `bench.sh --window`.
+- **A render diagnostic keeps its last value after its pass stops running.** `perf` only counts
+  fresh measurements for that reason; keep it that way if you touch `debug/perf.rs`.
 - **Two instances can't share a UDP port.** The LAN scenario uses 27555 so it can run beside a
   real game on the default 27015.
 
@@ -131,8 +141,8 @@ more. That is the engine compiling, once. Until it finishes there is nothing to 
 - **`cargo check` and `cargo clippy` make their own, lighter pass over the engine the first
   time they run**, so the first `scripts/check.sh` is slow too. Run it when the machine is
   otherwise idle. After that, `cargo check` is the fastest way to find compile errors.
-- **If the game is slow to play,** `exec cfg/low.cfg` in the console turns off the expensive
-  graphics. The harness can be given a longer timeout with `-t 300`.
+- **If the game is slow to play,** `r_quality low` in the console (or `exec cfg/low.cfg`)
+  turns off the expensive graphics, and is saved. The harness can be given a longer timeout with `-t 300`.
 
 ## What the tests cannot tell you
 

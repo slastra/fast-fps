@@ -52,12 +52,20 @@ commands run at startup.
 | `fire [shots]` | Pull the trigger from a script. |
 | `pos` | Print your position and view angles. |
 | `echo <text>`, `clear`, `help` | Print text, clear the console, list commands. |
+| `perf_reset` | Start a performance measurement. |
+| `perf [label]` | Print frame, CPU and GPU times since `perf_reset`. |
+| `vid_fullscreen <0\|1>` | Borderless fullscreen on the current display. |
 
-`docs/harness.md` explains how these fit together.
+`docs/harness.md` explains how these fit together; `docs/perf.md` covers measuring speed.
 
-## Render switches
+## Graphics
 
-For tracking down visual bugs and lighting test screenshots.
+| Command | |
+|---|---|
+| `r_quality <low\|medium\|high>` | Graphics preset, saved (default high). `low` is for laptops. |
+
+The switches below change one thing at a time, for tracking down visual bugs and measuring
+what each effect costs. They last until you quit.
 
 | Command | |
 |---|---|
@@ -67,5 +75,7 @@ For tracking down visual bugs and lighting test screenshots.
 | `r_fog <0\|1>` | Distance fog. |
 | `r_contact <0\|1>` | Contact shadows. |
 | `r_shadows <0\|1>` | Shadow maps on every light. |
+| `r_lamp_shadows <count>` | How many of the lamps nearest you cast shadows (default 2). |
+| `r_cascades <1-4>` | Shadow cascades for the sun or moon (default 4). |
 | `r_viewmodel <0\|1>` | Draw your own gun. |
 | `r_ambient <brightness>` | Flat fill light for inspecting models; 0 is off, 12 is a good test value. |
