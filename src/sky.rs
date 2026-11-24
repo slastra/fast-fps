@@ -6,8 +6,9 @@
 //! or retune one, edit [`SkyKind::look`]: every number that changes the mood
 //! of the game is in that one function.
 //!
-//! The sky itself is a faceted dome with its gradient baked into vertex
-//! colors, in keeping with the rest of the game. There is no sky texture.
+//! The sky itself is a smooth dome with its gradient baked into vertex
+//! colors. There is no sky texture. The sun or moon and the clouds are
+//! faceted, like the rest of the game.
 
 use std::f32::consts::TAU;
 
@@ -335,12 +336,18 @@ fn sky_material(color: LinearRgba) -> StandardMaterial {
     }
 }
 
+/// A smooth gradient: the color is set at each vertex and blended across the
+/// triangles. Fine enough (about 2.8 degrees between rows) that the tight glow
+/// around the sun or moon stays round.
 fn dome_mesh(look: &Look) -> Mesh {
-    let mut rng = StdRng::seed_from_u64(11);
-    let sphere = Sphere::new(1.0).mesh().ico(4).unwrap();
-    lowpoly::facet_with(sphere, &mut rng, |center, _, rng| {
-        lowpoly::shade(look.sky_color(center.normalize()), 0.025, rng)
-    })
+    let mut sphere = Sphere::new(1.0).mesh().uv(128, 64);
+    sphere.remove_attribute(Mesh::ATTRIBUTE_UV_0);
+    let colors: Vec<[f32; 4]> = lowpoly::positions(&sphere)
+        .into_iter()
+        .map(|p| lowpoly::scaled(look.sky_color(p.normalize_or(Vec3::Y)), 1.0))
+        .collect();
+    sphere.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+    sphere
 }
 
 fn disc_mesh(look: &Look) -> Mesh {

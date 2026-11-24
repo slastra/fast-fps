@@ -119,8 +119,9 @@ the way the shot was going. The gun drops separately.
 ![Bots firing](docs/img/bots-firing.jpg)
 
 **The look.** Everything is flat-shaded with color baked into each face. Boxes have beveled,
-slightly lighter edges so they catch the light. The sky is a faceted dome with stars, a moon
-or sun and drifting clouds, and each time of day sets its own light, fog and exposure.
+slightly lighter edges so they catch the light. Behind it all is a smooth gradient sky with
+stars, a faceted moon or sun and drifting clouds, and each time of day sets its own light,
+fog and exposure.
 
 **The HUD.** Large numerals, thin bars, and nothing that isn't needed right now: the weapon
 slots only appear when you switch. Weapon icons are side-on renders of the gun models, so a
