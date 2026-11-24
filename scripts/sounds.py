@@ -114,9 +114,9 @@ def silences(path: Path) -> list[tuple[float, float]]:
     return list(zip(starts, ends + [float("inf")] * (len(starts) - len(ends))))
 
 
-def ffmpeg_log(path: Path, filters: str) -> str:
+def ffmpeg_log(path: Path, filters: str, cut: list[str] | None = None) -> str:
     result = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-i", str(path), "-ac", "1", "-af", filters, "-f", "null", "-"],
+        ["ffmpeg", "-hide_banner", *(cut or []), "-i", str(path), "-ac", "1", "-af", filters, "-f", "null", "-"],
         capture_output=True,
         text=True,
         check=True,
@@ -140,13 +140,15 @@ def use(name: str, source: Path) -> None:
             end = min(end, gap_start + FADE)
             break
     length = end - start
-    peak = float(re.search(r"max_volume: ([-\d.]+) dB", ffmpeg_log(source, "volumedetect")).group(1))
+    cut = ["-ss", f"{start:.3f}", "-t", f"{length:.3f}"]
+    peak = float(re.search(r"max_volume: ([-\d.]+) dB", ffmpeg_log(source, "volumedetect", cut)).group(1))
     OUT.mkdir(parents=True, exist_ok=True)
     out = OUT / f"{name}.wav"
     subprocess.run(
         [
-            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
-            "-ss", f"{start:.3f}", "-t", f"{length:.3f}",
+            # Seek on the input, so the fade's times count from the cut.
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            *cut, "-i", str(source),
             "-ac", "1", "-ar", str(RATE), "-c:a", "pcm_s16le",
             "-af", f"volume={-1.0 - peak:.2f}dB,afade=t=out:st={max(length - FADE, 0):.3f}:d={FADE}",
             str(out),

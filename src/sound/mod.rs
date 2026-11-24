@@ -159,3 +159,49 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
         pin,
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use bevy::ecs::system::RunSystemOnce;
+
+    use super::*;
+
+    /// Write every sound to `target/sounds/all/` to listen to:
+    /// `cargo test dump_sounds -- --ignored`.
+    #[test]
+    #[ignore]
+    fn dump_sounds() {
+        let mut world = World::new();
+        world.init_resource::<Assets<AudioSource>>();
+        world.run_system_once(make_sounds).unwrap();
+        let sounds = world.resource::<Sounds>();
+        let mut named: Vec<(String, &Handle<AudioSource>)> = WeaponKind::ALL
+            .iter()
+            .map(|kind| {
+                (
+                    format!("shot-{}", kind.def().name.to_lowercase()),
+                    &sounds.shots[kind.index()],
+                )
+            })
+            .collect();
+        named.extend([
+            ("zoom".into(), &sounds.zoom),
+            ("hit".into(), &sounds.hit),
+            ("kill".into(), &sounds.kill),
+            ("click".into(), &sounds.click),
+            ("reload".into(), &sounds.reload),
+            ("knife_flesh".into(), &sounds.knife_flesh),
+            ("knife_wall".into(), &sounds.knife_wall),
+            ("bounce".into(), &sounds.bounce),
+            ("explode".into(), &sounds.explode),
+            ("pin".into(), &sounds.pin),
+        ]);
+        let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/sounds/all");
+        std::fs::create_dir_all(&out).unwrap();
+        let sources = world.resource::<Assets<AudioSource>>();
+        for (name, handle) in named {
+            let bytes = &sources.get(handle).unwrap().bytes;
+            std::fs::write(out.join(format!("{name}.wav")), bytes).unwrap();
+        }
+    }
+}
