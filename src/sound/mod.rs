@@ -1,8 +1,10 @@
-//! Sound effects. They are synthesized into WAV buffers at startup (see
-//! [`synth`]), so the game needs no audio files.
+//! Sound effects. Most are synthesized into WAV buffers at startup (see
+//! [`synth`]). The knife and grenade sounds are recordings generated with an
+//! AI model by `scripts/sounds.py` and built into the binary from
+//! `assets/sounds/`, so the game still loads no audio files at run time.
 //!
-//! To add a sound: add a field to [`Sounds`], build it in `make_sounds`, and
-//! call [`play`] where it should be heard.
+//! To add a sound: add a field to [`Sounds`], build or embed it in
+//! `make_sounds`, and call [`play`] where it should be heard.
 
 mod synth;
 
@@ -12,7 +14,7 @@ use bevy::{audio::Volume, prelude::*};
 
 use crate::weapon::WeaponKind;
 
-use crate::sound::synth::{Gun, click, shot, silence, swish, thud, tone, wav, with_action};
+use crate::sound::synth::{Gun, click, shot, silence, tone, wav, with_action};
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(PreStartup, make_sounds);
@@ -44,7 +46,32 @@ pub fn play(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32) {
     ));
 }
 
+/// A WAV file from `assets/sounds/`, embedded in the binary.
+macro_rules! recorded {
+    ($name:literal) => {
+        include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/assets/sounds/",
+            $name,
+            ".wav"
+        ))
+    };
+}
+
 fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>) {
+    let mut load = |bytes: &'static [u8]| {
+        sources.add(AudioSource {
+            bytes: Arc::from(bytes),
+        })
+    };
+    let knife = load(recorded!("knife"));
+    let throw = load(recorded!("throw"));
+    let knife_flesh = load(recorded!("flesh"));
+    let knife_wall = load(recorded!("wall"));
+    let bounce = load(recorded!("bounce"));
+    let explode = load(recorded!("explode"));
+    let pin = load(recorded!("pin"));
+
     let mut add = |samples: Vec<f32>| {
         sources.add(AudioSource {
             bytes: Arc::from(wav(&samples)),
@@ -109,9 +136,9 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
                 &[(0.62, 0.04), (0.78, 0.05), (0.98, 0.04)],
             )),
             // Knife: a quick swish through the air.
-            add(swish(0.2, 0.5, 6)),
+            knife,
             // Grenade: the arm's whoosh as it leaves the hand.
-            add(swish(0.28, 0.25, 7)),
+            throw,
         ],
         zoom: add(click(0.015)),
         hit: add(tone(&[(1900.0, 0.045)], 70.0)),
@@ -125,19 +152,10 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
             click(0.03),
         ]
         .concat()),
-        knife_flesh: add(thud(110.0, 0.16)),
-        pin: add([click(0.02), silence(0.06), click(0.015)].concat()),
-        knife_wall: add(tone(&[(2600.0, 0.09)], 45.0)),
-        bounce: add(thud(320.0, 0.07)),
-        // A big, slow gunshot is a good explosion.
-        explode: add(shot(Gun {
-            crack: 1.0,
-            body: 3.2,
-            thump_hz: 70.0,
-            thump: 1.3,
-            decay: 2.6,
-            secs: 1.8,
-            seed: 9,
-        })),
+        knife_flesh,
+        knife_wall,
+        bounce,
+        explode,
+        pin,
     });
 }

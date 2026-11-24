@@ -21,7 +21,9 @@ coding agents.
 - **Practice bots** you can order around from the console
 - **A test harness** that scripts the real game and reports PASS or FAIL
 - **One command to start a new game** from this one, under its own name
-- **No asset pipeline**: the map, sky, guns, icons, bodies and sounds are generated from code
+- **No asset pipeline**: the map, sky, guns, icons, bodies and gunshots are generated from code.
+  The knife and grenade sounds were made with an AI model (`scripts/sounds.py`) and are built
+  into the binary
 
 ## Install
 

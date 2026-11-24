@@ -96,41 +96,6 @@ pub fn click(secs: f32) -> Vec<f32> {
         .collect()
 }
 
-/// A blade or a thrown arm cutting the air: noise whose brightness rises and
-/// falls, swelling in the middle.
-pub fn swish(secs: f32, bright: f32, seed: u32) -> Vec<f32> {
-    let mut noise = Noise(0xA5A5_0001 ^ seed.wrapping_mul(0x9E37_79B9));
-    let mut low = 0.0;
-    let mut band = 0.0;
-    let n_samples = samples(secs);
-    (0..n_samples)
-        .map(|i| {
-            let x = i as f32 / n_samples as f32;
-            let env = (x * std::f32::consts::PI).sin().powi(2);
-            let k = 0.04 + bright * env;
-            let n = noise.next();
-            low += (n - low) * k;
-            band += (low - band) * 0.02;
-            (low - band) * env * 1.3
-        })
-        .collect()
-}
-
-/// A dull hit: a short low knock with a little noise on top.
-pub fn thud(hz: f32, secs: f32) -> Vec<f32> {
-    let mut noise = Noise(0x7070_1313);
-    let mut low = 0.0;
-    (0..samples(secs))
-        .map(|i| {
-            let t = i as f32 / RATE as f32;
-            let n = noise.next();
-            low += (n - low) * 0.12;
-            let env = (-t * 28.0).exp();
-            ((t * hz * TAU).sin() * 0.8 + low * 0.9) * env
-        })
-        .collect()
-}
-
 pub fn silence(secs: f32) -> Vec<f32> {
     vec![0.0; samples(secs)]
 }

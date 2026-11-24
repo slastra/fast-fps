@@ -128,8 +128,14 @@ Check: `scripts/harness.sh -s 1600x900 tests/harness/look.cfg` and look at the s
 ## Add a sound
 
 1. Add a field to `Sounds` in `src/sound/mod.rs`.
-2. Build it in `make_sounds` from the pieces in `src/sound/synth.rs` (`tone`, `click`, `shot`,
-   `silence`, joined with `concat`).
+2. Make it one of two ways:
+   - **From code:** build it in `make_sounds` from the pieces in `src/sound/synth.rs` (`tone`,
+     `click`, `shot`, `silence`, joined with `concat`).
+   - **Recorded:** add a prompt to `SOUNDS` in `scripts/sounds.py`, then run
+     `scripts/sounds.py gen <name> -n 3` (needs `OPENROUTER_API_KEY`, a few cents). Listen to
+     the takes in `target/sounds/`, and `scripts/sounds.py use <name> <take>` trims and levels
+     the one you like into `assets/sounds/<name>.wav`. Load it in `make_sounds` with
+     `load(recorded!("<name>"))`. Keep recordings short; they are built into the binary.
 3. Play it with `play(&mut commands, &sounds.your_sound, volume)`.
 
 Check: by ear. The harness can't hear.
