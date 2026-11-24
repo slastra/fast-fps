@@ -33,6 +33,8 @@ pub struct Sounds {
     /// A grenade hitting the ground, and going off.
     pub bounce: Handle<AudioSource>,
     pub explode: Handle<AudioSource>,
+    /// Pulling a grenade's pin.
+    pub pin: Handle<AudioSource>,
 }
 
 pub fn play(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32) {
@@ -108,13 +110,8 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
             )),
             // Knife: a quick swish through the air.
             add(swish(0.2, 0.5, 6)),
-            // Grenade: the pin, then the arm's whoosh.
-            add([
-                click(0.02),
-                silence(0.05),
-                swish(0.28, 0.25, 7).into_iter().map(|v| v * 0.7).collect(),
-            ]
-            .concat()),
+            // Grenade: the arm's whoosh as it leaves the hand.
+            add(swish(0.28, 0.25, 7)),
         ],
         zoom: add(click(0.015)),
         hit: add(tone(&[(1900.0, 0.045)], 70.0)),
@@ -129,6 +126,7 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
         ]
         .concat()),
         knife_flesh: add(thud(110.0, 0.16)),
+        pin: add([click(0.02), silence(0.06), click(0.015)].concat()),
         knife_wall: add(tone(&[(2600.0, 0.09)], 45.0)),
         bounce: add(thud(320.0, 0.07)),
         // A big, slow gunshot is a good explosion.

@@ -51,6 +51,7 @@ commands run at startup.
 | `spin <deg/s>` | Turn steadily; 0 stops. |
 | `fire [shots]` | Pull the trigger from a script (a knife slash, a grenade throw). |
 | `fire_alt [times]` | Right click from a script: knife stab, grenade lob. |
+| `fire_hold <seconds> [alt]` | Hold the left (or right) button: charge a grenade for that long. |
 | `pos` | Print your position and view angles. |
 | `echo <text>`, `clear`, `help` | Print text, clear the console, list commands. |
 | `perf_reset` | Start a performance measurement. |

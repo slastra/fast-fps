@@ -380,9 +380,12 @@ impl Knife {
 
 /// The frag grenade, Counter-Strike HE style: one per life.
 pub struct Grenade {
-    /// Throw speed with left click, and the underhand lob with right click.
-    pub throw_speed: f32,
-    pub lob_speed: f32,
+    /// Throw speed with left click, from a tap to a full charge, and the same
+    /// for the underhand lob with right click.
+    pub throw_speed: (f32, f32),
+    pub lob_speed: (f32, f32),
+    /// Seconds of holding the button for a full-strength throw.
+    pub charge_secs: f32,
     /// Seconds from release to the bang.
     pub fuse: f32,
     /// Damage at the center, falling linearly to nothing at `radius`.
@@ -393,8 +396,9 @@ pub struct Grenade {
 }
 
 pub const GRENADE: Grenade = Grenade {
-    throw_speed: 17.0,
-    lob_speed: 8.0,
+    throw_speed: (7.0, 18.0),
+    lob_speed: (3.0, 9.0),
+    charge_secs: 0.8,
     fuse: 2.5,
     damage: 98.0,
     radius: 7.0,
@@ -402,6 +406,27 @@ pub const GRENADE: Grenade = Grenade {
 };
 
 impl Grenade {
+    /// Launch speed for a throw (or lob) at `strength`, 0 (a tap) to 1 (fully
+    /// charged).
+    pub fn speed(&self, lob: bool, strength: f32) -> f32 {
+        let (low, high) = if lob {
+            self.lob_speed
+        } else {
+            self.throw_speed
+        };
+        let strength = if strength.is_finite() {
+            strength.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        low + (high - low) * strength
+    }
+
+    /// How charged a throw is after holding the button for `held` seconds.
+    pub fn strength(&self, held: f32) -> f32 {
+        (held / self.charge_secs).clamp(0.0, 1.0)
+    }
+
     /// Damage at `distance` meters from the blast, before walls are checked.
     pub fn damage_at(&self, distance: f32) -> f32 {
         (self.damage * (1.0 - distance / self.radius)).max(0.0)
@@ -421,7 +446,22 @@ mod tests {
     }
 
     #[test]
-    fn backstab_only_is_behind() {
+    fn holding_throws_harder() {
+        assert_eq!(GRENADE.speed(false, 0.0), 7.0);
+        assert_eq!(GRENADE.speed(false, 1.0), 18.0);
+        assert_eq!(GRENADE.speed(true, 1.0), 9.0);
+        assert_eq!(GRENADE.speed(false, 5.0), 18.0, "clamped");
+        assert_eq!(
+            GRENADE.speed(false, f32::NAN),
+            18.0,
+            "garbage from a client"
+        );
+        assert_eq!(GRENADE.strength(0.4), 0.5);
+        assert_eq!(GRENADE.strength(2.0), 1.0);
+    }
+
+    #[test]
+    fn backstab_only_from_behind() {
         // The victim faces -z (yaw 0).
         assert!(KNIFE.is_behind(Vec3::NEG_Z, 0.0), "same way: behind");
         assert!(!KNIFE.is_behind(Vec3::Z, 0.0), "face to face");

@@ -144,7 +144,7 @@ fn collect(
     (local, name): (&LocalId, &LocalName),
     players: &Query<(&Player, &Health, &Score)>,
     (ragdolls, decals, dummies_down): (usize, usize, usize),
-    (grenades, explosions): (usize, u32),
+    (grenades, explosions): (usize, &Explosions),
     arsenal: &Arsenal,
     (body, velocity, controller): (&Transform, &LinearVelocity, &CharacterControllerState),
     view: &ViewSettings,
@@ -178,7 +178,9 @@ fn collect(
     probe.set("decals", decals);
     probe.set("dummies_down", dummies_down);
     probe.set("grenades", grenades);
-    probe.set("explosions", explosions);
+    probe.set("explosions", explosions.count);
+    probe.set("blast_x", format!("{:.1}", explosions.last.x));
+    probe.set("blast_z", format!("{:.1}", explosions.last.z));
 
     probe.set("weapon", arsenal.def().name.to_lowercase());
     probe.set("ammo", arsenal.ammo[arsenal.current.index()]);
@@ -247,7 +249,7 @@ fn probe(
             decals.iter().count(),
             dummies_down.iter().count(),
         ),
-        (grenades.iter().count(), explosions.0),
+        (grenades.iter().count(), &explosions),
         &arsenal,
         *body,
         &view,

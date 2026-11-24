@@ -53,8 +53,9 @@ crouch, left click to fire, right click to scope (sniper), R to reload, 1-7 or t
 switch weapons, Q for the last weapon, Tab for scores, Esc to release the mouse.
 
 6 is the knife: left click slashes, right click stabs, and any hit from behind kills. You
-run a little faster with it out. 7 is the grenade: left click throws, right click lobs. You
-get one per life.
+run a little faster with it out. 7 is the grenade: hold left click to wind up (a bar under
+the crosshair fills; the longer you hold, the farther it goes) and let go to throw. Right
+click does the same as an underhand lob. You get one per life.
 
 For something to shoot at, press `~` and type `exec cfg/bots.cfg`. To change the time of day,
 type `sky night`, `sky dusk`, `sky dawn`, `sky day`, or `sky next` to cycle.

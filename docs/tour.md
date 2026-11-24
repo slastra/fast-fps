@@ -111,7 +111,7 @@ Following one shot through the code shows how the pieces connect.
 A knife swing takes the same road with a `Melee` message (`weapon/knife.rs`, then
 `receive_melee` in `server/combat.rs`). A grenade is different because it exists for a while:
 
-1. **`weapon/throw.rs`** winds the arm up, then sends `Throw`.
+1. **`weapon/throw.rs`** charges while the button is held, then sends `Throw` with the strength.
 2. **`server/grenades.rs` `receive_throws`** spawns a physics body with a fuse and a
    replicated `Projectile`, so every client sees it fly (`weapon/blast.rs` gives it a model
    and moves it to the replicated position).

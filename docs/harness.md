@@ -149,6 +149,7 @@ allows a tiny rounding error); anything else compares as text, ignoring case, wi
 | `dummies_down` | practice dummies currently knocked over |
 | `grenades` | grenades in flight |
 | `explosions` | grenade explosions this machine has seen |
+| `blast_x`, `blast_z` | where the last one went off |
 | `sens`, `fov` | view settings |
 | `sky` | `night`, `dusk`, `dawn` or `day` |
 | `name`, `time`, `fps` | your name, game seconds since start, frame rate |

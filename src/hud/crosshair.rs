@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use crate::{
     hud::{ACCENT, CrossBar, CrosshairRoot, DANGER, ReloadFill, ReloadTrack, ScopeOverlay, TEXT},
     render::WorldCamera,
-    weapon::{Arsenal, HitMarker},
+    weapon::{Arsenal, GRENADE, HitMarker},
 };
 
 /// The gap is the inaccuracy cone projected onto the screen: a bullet will
@@ -61,12 +61,20 @@ pub fn crosshair(
     }
 }
 
-/// A thin bar under the crosshair that fills while you reload.
+/// A thin bar under the crosshair that fills while you reload, or while you
+/// charge a grenade throw.
 pub fn reload_bar(
     arsenal: Res<Arsenal>,
     mut track: Single<&mut Visibility, With<ReloadTrack>>,
     mut fill: Single<(&mut Node, &mut BackgroundColor), With<ReloadFill>>,
 ) {
+    if let Some((held, _)) = arsenal.charge {
+        track.set_if_neq(Visibility::Inherited);
+        let strength = GRENADE.strength(held);
+        fill.0.width = percent(strength * 100.0);
+        fill.1.0 = if strength >= 1.0 { TEXT } else { ACCENT };
+        return;
+    }
     let reloading = arsenal.reloading > 0.0;
     track.set_if_neq(if reloading {
         Visibility::Inherited

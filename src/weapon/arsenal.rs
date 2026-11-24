@@ -17,11 +17,14 @@ use crate::{
 pub struct HideViewModel(pub bool);
 
 /// Clicks queued by the `fire` and `fire_alt` console commands (for scripted
-/// tests): left and right mouse button.
+/// tests): left and right mouse button. `fire_hold` holds a button down for a
+/// number of seconds instead (charging a grenade).
 #[derive(Resource, Default)]
 pub struct ScriptedFire {
     pub primary: u32,
     pub alt: u32,
+    pub hold: f32,
+    pub hold_alt: f32,
 }
 
 /// The knife or arm motion in progress, for the view model.
@@ -99,9 +102,9 @@ pub struct Arsenal {
     /// The current swing and how far through it is, 0 to 1.
     pub swing: Swing,
     pub swing_t: f32,
-    /// A grenade throw waiting for the wind-up to finish: seconds left, and
-    /// whether it is a lob.
-    pub windup: Option<(f32, bool)>,
+    /// A grenade being charged: seconds the button has been held, and
+    /// whether it is a lob (right button).
+    pub charge: Option<(f32, bool)>,
     pub rng: StdRng,
 }
 
@@ -126,7 +129,7 @@ impl Default for Arsenal {
             since_pump: 10.0,
             swing: Swing::None,
             swing_t: 1.0,
-            windup: None,
+            charge: None,
             rng: StdRng::seed_from_u64(1),
         }
     }
@@ -155,7 +158,7 @@ impl Arsenal {
         self.kick = 0.0;
         self.swing = Swing::None;
         self.swing_t = 1.0;
-        self.windup = None;
+        self.charge = None;
         true
     }
 

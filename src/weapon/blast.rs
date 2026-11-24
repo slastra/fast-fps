@@ -21,9 +21,13 @@ use crate::{
     weapon::{GRENADE, WeaponKind},
 };
 
-/// How many explosions this machine has seen (the `explosions` probe value).
+/// How many explosions this machine has seen and where the last one was
+/// (the `explosions`, `blast_x` and `blast_z` probe values).
 #[derive(Resource, Default)]
-pub struct Explosions(pub u32);
+pub struct Explosions {
+    pub count: u32,
+    pub last: Vec3,
+}
 
 #[derive(Resource)]
 struct BlastAssets {
@@ -181,7 +185,8 @@ fn explosions(
     mut commands: Commands,
 ) {
     for blast in blasts.read() {
-        count.0 += 1;
+        count.count += 1;
+        count.last = blast.pos;
         let at = blast.pos;
         let rng = &mut fx_rng.0;
 

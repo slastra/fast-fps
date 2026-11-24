@@ -50,6 +50,11 @@ pub(super) fn plugin(app: &mut App) {
         "fire_alt",
         "[times]",
         "right click from a script: knife stab, grenade lob",
+    )
+    .console_command(
+        "fire_hold",
+        "<seconds> [alt]",
+        "hold the left (or right) button from a script: charge a grenade",
     );
 }
 
@@ -125,6 +130,14 @@ fn scene_commands(
             }
             "fire" => scripted_fire.primary += numbers.first().map_or(1, |n| *n as u32),
             "fire_alt" => scripted_fire.alt += numbers.first().map_or(1, |n| *n as u32),
+            "fire_hold" => {
+                let secs = numbers.first().copied().unwrap_or(0.5);
+                if cmd.arg(1) == Some("alt") {
+                    scripted_fire.hold_alt = secs;
+                } else {
+                    scripted_fire.hold = secs;
+                }
+            }
             "spin" => spin.0 = numbers.first().copied().unwrap_or(0.0),
             _ => {}
         }

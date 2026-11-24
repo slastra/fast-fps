@@ -74,11 +74,8 @@ pub fn receive_throws(
             Some(hit) => message.origin + dir * (hit.distance - RADIUS * 2.0).max(0.0),
             None => message.origin + dir * ahead,
         };
-        let (speed, lift) = if message.lob {
-            (GRENADE.lob_speed, 2.0)
-        } else {
-            (GRENADE.throw_speed, 1.5)
-        };
+        let speed = GRENADE.speed(message.lob, message.strength);
+        let lift = if message.lob { 2.0 } else { 1.5 };
         let Ok((player, pose)) = players.get(thrower) else {
             continue;
         };
@@ -92,7 +89,14 @@ pub fn receive_throws(
             Collider::sphere(RADIUS),
             Mass(0.4),
             Restitution::new(GRENADE.bounce),
-            Friction::new(0.7),
+            (
+                Friction::new(0.8),
+                // A ball rolls forever; a grenade skids and stops. Damping
+                // spin hard and speed a little lets it settle in a couple of
+                // meters.
+                AngularDamping(5.0),
+                LinearDamping(0.4),
+            ),
             LinearVelocity(dir * speed + Vec3::Y * lift + carried),
             AngularVelocity(Vec3::new(8.0, 3.0, 0.0)),
             SweptCcd::default(),

@@ -133,10 +133,12 @@ pub struct Melee {
     pub dir: Vec3,
 }
 
-/// A grenade leaving the hand: a throw, or an underhand lob with right click.
+/// A grenade leaving the hand: a throw, or an underhand lob with right click,
+/// at a strength from 0 (a tap) to 1 (held for a full charge).
 #[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct Throw {
     pub lob: bool,
+    pub strength: f32,
     pub origin: Vec3,
     pub dir: Vec3,
 }

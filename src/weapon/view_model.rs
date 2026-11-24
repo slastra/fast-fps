@@ -240,6 +240,15 @@ fn swing_secs(swing: Swing) -> f32 {
 /// rest position (model space) and its rotation.
 fn swing_pose(arsenal: &mut Arsenal, dt: f32) -> (Vec3, Quat) {
     use std::f32::consts::PI;
+    // Charging a grenade: the arm draws back as the throw builds.
+    if let Some((held, lob)) = arsenal.charge {
+        let u = super::GRENADE.strength(held).powf(0.6);
+        let (lift, turn) = if lob { (-0.06, -0.4) } else { (0.14, 0.9) };
+        return (
+            Vec3::new(0.04 * u, lift * u, 0.2 * u),
+            Quat::from_rotation_x(turn * u),
+        );
+    }
     if arsenal.swing == Swing::None {
         return (Vec3::ZERO, Quat::IDENTITY);
     }
