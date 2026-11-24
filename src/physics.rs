@@ -15,4 +15,6 @@ pub enum Layer {
     Hitbox,
     /// Corpses: collide with the world only, and never stop bullets or players.
     Ragdoll,
+    /// Grenades in flight: bounce off the world only.
+    Projectile,
 }

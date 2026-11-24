@@ -16,7 +16,7 @@ use crate::{
     render::WorldCamera,
     sound::{Sounds, play},
     weapon::{
-        PUNCH_SCALE,
+        Class, PUNCH_SCALE, WeaponKind,
         arsenal::{Arsenal, HitMarker, ScriptedFire},
         view_model::Muzzles,
     },
@@ -89,11 +89,15 @@ pub fn fire(
     arsenal.since_pump += dt;
 
     let def = arsenal.def();
+    // The knife and the grenade have their own systems (`knife`, `grenade`).
+    if def.class != Class::Gun {
+        return;
+    }
     let clicked = input.enabled && mouse.just_pressed(MouseButton::Left);
     if clicked {
         arsenal.buffered_click = 0.15;
     }
-    let scripted_shot = scripted.0 > 0;
+    let scripted_shot = scripted.primary > 0;
     let held = input.enabled && mouse.pressed(MouseButton::Left);
     let want = scripted_shot
         || if def.automatic {
@@ -104,7 +108,7 @@ pub fn fire(
     if !want || arsenal.reloading > 0.0 || arsenal.draw > 0.0 || arsenal.cooldown > 0.0 {
         return;
     }
-    scripted.0 = scripted.0.saturating_sub(1);
+    scripted.primary = scripted.primary.saturating_sub(1);
     arsenal.buffered_click = 0.0;
     let kind = arsenal.current;
     if arsenal.ammo[kind.index()] == 0 {
@@ -192,6 +196,9 @@ pub fn reload(
     let asked = cmds.read().filter(|c| c.name == "reload").count() > 0;
     let kind = arsenal.current;
     let def = kind.def();
+    if def.class != Class::Gun {
+        return;
+    }
     if arsenal.reloading > 0.0 {
         arsenal.reloading -= time.delta_secs();
         if arsenal.reloading <= 0.0 {
@@ -237,10 +244,14 @@ pub fn recover(
 pub fn hit_confirms(
     mut confirms: MessageReader<HitConfirm>,
     mut marker: ResMut<HitMarker>,
+    arsenal: Res<Arsenal>,
     mut commands: Commands,
     sounds: Res<Sounds>,
 ) {
     for confirm in confirms.read() {
+        if arsenal.current == WeaponKind::Knife {
+            play(&mut commands, &sounds.knife_flesh, 0.7);
+        }
         marker.time = if confirm.kill { 0.45 } else { 0.18 };
         marker.kill = confirm.kill;
         let sound = if confirm.kill {

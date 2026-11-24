@@ -12,7 +12,7 @@ use bevy::{audio::Volume, prelude::*};
 
 use crate::weapon::WeaponKind;
 
-use crate::sound::synth::{Gun, click, shot, silence, tone, wav, with_action};
+use crate::sound::synth::{Gun, click, shot, silence, swish, thud, tone, wav, with_action};
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(PreStartup, make_sounds);
@@ -27,6 +27,12 @@ pub struct Sounds {
     pub kill: Handle<AudioSource>,
     pub click: Handle<AudioSource>,
     pub reload: Handle<AudioSource>,
+    /// The knife meeting a body, and meeting a wall.
+    pub knife_flesh: Handle<AudioSource>,
+    pub knife_wall: Handle<AudioSource>,
+    /// A grenade hitting the ground, and going off.
+    pub bounce: Handle<AudioSource>,
+    pub explode: Handle<AudioSource>,
 }
 
 pub fn play(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32) {
@@ -100,6 +106,15 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
                 }),
                 &[(0.62, 0.04), (0.78, 0.05), (0.98, 0.04)],
             )),
+            // Knife: a quick swish through the air.
+            add(swish(0.2, 0.5, 6)),
+            // Grenade: the pin, then the arm's whoosh.
+            add([
+                click(0.02),
+                silence(0.05),
+                swish(0.28, 0.25, 7).into_iter().map(|v| v * 0.7).collect(),
+            ]
+            .concat()),
         ],
         zoom: add(click(0.015)),
         hit: add(tone(&[(1900.0, 0.045)], 70.0)),
@@ -113,5 +128,18 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
             click(0.03),
         ]
         .concat()),
+        knife_flesh: add(thud(110.0, 0.16)),
+        knife_wall: add(tone(&[(2600.0, 0.09)], 45.0)),
+        bounce: add(thud(320.0, 0.07)),
+        // A big, slow gunshot is a good explosion.
+        explode: add(shot(Gun {
+            crack: 1.0,
+            body: 3.2,
+            thump_hz: 70.0,
+            thump: 1.3,
+            decay: 2.6,
+            secs: 1.8,
+            seed: 9,
+        })),
     });
 }

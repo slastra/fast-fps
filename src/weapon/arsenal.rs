@@ -16,9 +16,25 @@ use crate::{
 #[derive(Resource, Default)]
 pub struct HideViewModel(pub bool);
 
-/// Shots queued by the `fire` console command (for scripted tests).
+/// Clicks queued by the `fire` and `fire_alt` console commands (for scripted
+/// tests): left and right mouse button.
 #[derive(Resource, Default)]
-pub struct ScriptedFire(pub u32);
+pub struct ScriptedFire {
+    pub primary: u32,
+    pub alt: u32,
+}
+
+/// The knife or arm motion in progress, for the view model.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Swing {
+    #[default]
+    None,
+    /// A slash across, alternating sides: +1 sweeps to the left, -1 to the right.
+    Slash(f32),
+    Stab,
+    /// Winding up to throw (the grenade still in hand), then the follow-through.
+    Throw,
+}
 
 /// Set by a server hit confirmation; the HUD fades it out.
 #[derive(Resource, Default)]
@@ -80,6 +96,12 @@ pub struct Arsenal {
     pub flash: f32,
     pub bob: f32,
     pub since_pump: f32,
+    /// The current swing and how far through it is, 0 to 1.
+    pub swing: Swing,
+    pub swing_t: f32,
+    /// A grenade throw waiting for the wind-up to finish: seconds left, and
+    /// whether it is a lob.
+    pub windup: Option<(f32, bool)>,
     pub rng: StdRng,
 }
 
@@ -102,6 +124,9 @@ impl Default for Arsenal {
             flash: 0.0,
             bob: 0.0,
             since_pump: 10.0,
+            swing: Swing::None,
+            swing_t: 1.0,
+            windup: None,
             rng: StdRng::seed_from_u64(1),
         }
     }
@@ -116,7 +141,8 @@ impl Arsenal {
         self.zoom > 0
     }
 
-    fn select(&mut self, kind: WeaponKind) -> bool {
+    /// Switch to `kind`; false if already holding it.
+    pub fn select(&mut self, kind: WeaponKind) -> bool {
         if kind == self.current {
             return false;
         }
@@ -127,7 +153,21 @@ impl Arsenal {
         self.zoom = 0;
         self.spray = 0.0;
         self.kick = 0.0;
+        self.swing = Swing::None;
+        self.swing_t = 1.0;
+        self.windup = None;
         true
+    }
+
+    /// The weapon held before this one.
+    pub fn last(&self) -> WeaponKind {
+        self.last
+    }
+
+    /// Start a swing animation.
+    pub fn start_swing(&mut self, swing: Swing) {
+        self.swing = swing;
+        self.swing_t = 0.0;
     }
 }
 
@@ -157,7 +197,9 @@ pub fn weapon_commands(
                 }
             }
             None => {
-                print.write(Print::error("usage: weapon <ak|mp5|glock|shotgun|sniper>"));
+                print.write(Print::error(
+                    "usage: weapon <ak|mp5|glock|shotgun|sniper|knife|grenade>",
+                ));
             }
         }
     }

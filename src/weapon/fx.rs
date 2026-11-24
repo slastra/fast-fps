@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use super::WeaponKind;
+use super::{Class, WeaponKind};
 use crate::{
     avatar::rig::AvatarRig,
     net::{Player, ShotFx},
@@ -136,29 +136,12 @@ pub fn impact(
 ) {
     let normal = normal.try_normalize().unwrap_or(Vec3::Y);
     let count = if flesh { 8 } else { 5 };
-    for _ in 0..count {
-        let random = Vec3::new(
-            rng.random_range(-1.0..1.0),
-            rng.random_range(-1.0..1.0),
-            rng.random_range(-1.0..1.0),
-        );
-        let velocity = (normal * 1.2 + random).normalize_or_zero() * rng.random_range(2.0..6.0);
-        let material = if flesh {
-            fx.blood_mat.clone()
-        } else {
-            fx.spark_mat.clone()
-        };
-        commands.spawn((
-            Mesh3d(fx.spark.clone()),
-            MeshMaterial3d(material),
-            Transform::from_translation(at + normal * 0.03),
-            Spark {
-                velocity,
-                life: rng.random_range(0.2..0.45),
-            },
-            no_shadow(),
-        ));
-    }
+    let material = if flesh {
+        fx.blood_mat.clone()
+    } else {
+        fx.spark_mat.clone()
+    };
+    spray(commands, fx, at, normal, count, material, rng);
     if flesh {
         return;
     }
@@ -188,6 +171,72 @@ pub fn impact(
     }
 }
 
+/// Sparks flying off a surface.
+pub fn sparks(commands: &mut Commands, fx: &FxAssets, at: Vec3, normal: Vec3, rng: &mut StdRng) {
+    let normal = normal.try_normalize().unwrap_or(Vec3::Y);
+    spray(commands, fx, at, normal, 8, fx.spark_mat.clone(), rng);
+}
+
+fn spray(
+    commands: &mut Commands,
+    fx: &FxAssets,
+    at: Vec3,
+    normal: Vec3,
+    count: usize,
+    material: Handle<StandardMaterial>,
+    rng: &mut StdRng,
+) {
+    for _ in 0..count {
+        let random = Vec3::new(
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+            rng.random_range(-1.0..1.0),
+        );
+        let velocity = (normal * 1.2 + random).normalize_or_zero() * rng.random_range(2.0..6.0);
+        commands.spawn((
+            Mesh3d(fx.spark.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(at + normal * 0.03),
+            Spark {
+                velocity,
+                life: rng.random_range(0.2..0.45),
+            },
+            no_shadow(),
+        ));
+    }
+}
+
+/// A blast mark on the ground: a big, ragged version of a bullet hole.
+pub fn scorch(
+    commands: &mut Commands,
+    fx: &FxAssets,
+    decals: &mut Decals,
+    at: Vec3,
+    normal: Vec3,
+    rng: &mut StdRng,
+) {
+    let normal = normal.try_normalize().unwrap_or(Vec3::Y);
+    let up = if normal.y.abs() > 0.95 {
+        Vec3::X
+    } else {
+        Vec3::Y
+    };
+    let spin = Quat::from_rotation_z(rng.random_range(0.0..std::f32::consts::TAU));
+    let decal = commands
+        .spawn((
+            Mesh3d(fx.decal.clone()),
+            MeshMaterial3d(fx.decal_mat.clone()),
+            Transform::from_translation(at + normal * 0.006)
+                .looking_to(-normal, up)
+                .mul_transform(Transform::from_rotation(spin))
+                .with_scale(Vec3::splat(rng.random_range(24.0..30.0))),
+            Decal(DECAL_SECS),
+            no_shadow(),
+        ))
+        .id();
+    decals.0.push_back(decal);
+}
+
 fn remote_shots(
     mut shots: MessageReader<ShotFx>,
     mut commands: Commands,
@@ -210,7 +259,11 @@ fn remote_shots(
             .and_then(|(_, rig)| globals.get(rig.gun).ok())
             .map(|gun| gun.transform_point(super::muzzle(shot.weapon)))
             .unwrap_or(shot.origin + dir * 0.7 - Vec3::Y * 0.15);
-        tracer(&mut commands, &fx, start, shot.end, shot.weapon);
+        // Only guns fire bullets; a knife swing has no tracer or flash.
+        let gun = shot.weapon.def().class == Class::Gun;
+        if gun {
+            tracer(&mut commands, &fx, start, shot.end, shot.weapon);
+        }
         if shot.normal != Vec3::ZERO {
             impact(
                 &mut commands,
@@ -226,6 +279,17 @@ fn remote_shots(
             continue;
         }
         blasts.push(shot.origin);
+        let distance = listener.translation().distance(shot.origin);
+        if !gun {
+            let volume = (1.0 - distance / 30.0).clamp(0.0, 1.0) * 0.5;
+            let sound = if shot.flesh {
+                &sounds.knife_flesh
+            } else {
+                &sounds.shots[shot.weapon.index()]
+            };
+            play(&mut commands, sound, volume);
+            continue;
+        }
         commands.spawn((
             PointLight {
                 color: Color::srgb(1.0, 0.65, 0.3),
@@ -236,7 +300,6 @@ fn remote_shots(
             Transform::from_translation(start),
             FlashLight(0.05),
         ));
-        let distance = listener.translation().distance(shot.origin);
         let volume = (1.0 - distance / 90.0).clamp(0.05, 1.0) * 0.45;
         play(&mut commands, &sounds.shots[shot.weapon.index()], volume);
     }

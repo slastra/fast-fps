@@ -31,10 +31,10 @@ use bevy_replicon_renet::RenetServer;
 use crate::{
     avatar::Ragdoll,
     console::{ConsoleAppExt, ConsoleCommand, Print, ScriptHold},
-    net::{Downed, Dummy, Health, LocalId, LocalName, Player, Score},
+    net::{Downed, Dummy, Health, LocalId, LocalName, Player, Projectile, Score},
     player::{LocalPlayer, ViewSettings},
     sky::Sky,
-    weapon::{Arsenal, fx::Decal},
+    weapon::{Arsenal, Explosions, fx::Decal},
 };
 
 /// Seconds `wait_until` waits when the script doesn't say.
@@ -144,6 +144,7 @@ fn collect(
     (local, name): (&LocalId, &LocalName),
     players: &Query<(&Player, &Health, &Score)>,
     (ragdolls, decals, dummies_down): (usize, usize, usize),
+    (grenades, explosions): (usize, u32),
     arsenal: &Arsenal,
     (body, velocity, controller): (&Transform, &LinearVelocity, &CharacterControllerState),
     view: &ViewSettings,
@@ -176,6 +177,8 @@ fn collect(
     probe.set("ragdolls", ragdolls);
     probe.set("decals", decals);
     probe.set("dummies_down", dummies_down);
+    probe.set("grenades", grenades);
+    probe.set("explosions", explosions);
 
     probe.set("weapon", arsenal.def().name.to_lowercase());
     probe.set("ammo", arsenal.ammo[arsenal.current.index()]);
@@ -211,6 +214,7 @@ fn probe(
         Query<(), (With<Dummy>, With<Downed>)>,
     ),
     arsenal: Res<Arsenal>,
+    (grenades, explosions): (Query<(), With<Projectile>>, Res<Explosions>),
     body: Single<(&Transform, &LinearVelocity, &CharacterControllerState), With<LocalPlayer>>,
     (view, sky): (Res<ViewSettings>, Res<Sky>),
     diagnostics: Res<DiagnosticsStore>,
@@ -243,6 +247,7 @@ fn probe(
             decals.iter().count(),
             dummies_down.iter().count(),
         ),
+        (grenades.iter().count(), explosions.0),
         &arsenal,
         *body,
         &view,

@@ -59,6 +59,9 @@ pub fn knock(weapon: WeaponKind) -> f32 {
         WeaponKind::Ak => 3.5,
         WeaponKind::Shotgun => 7.5,
         WeaponKind::Sniper => 9.0,
+        WeaponKind::Knife => 2.0,
+        // A blast throws bodies hard, away from the grenade.
+        WeaponKind::Grenade => 10.0,
     }
 }
 

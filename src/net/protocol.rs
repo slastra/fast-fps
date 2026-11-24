@@ -22,16 +22,20 @@ pub(super) fn register(app: &mut App) {
         .replicate::<Loadout>()
         .replicate::<Dummy>()
         .replicate::<Downed>()
+        .replicate::<Projectile>()
         .add_client_message::<MoveInput>(Channel::Unreliable)
         .add_client_message::<Fire>(Channel::Ordered)
         .add_client_message::<SelectWeapon>(Channel::Ordered)
         .add_client_message::<SetName>(Channel::Ordered)
         .add_client_message::<Suicide>(Channel::Ordered)
+        .add_client_message::<Melee>(Channel::Ordered)
+        .add_client_message::<Throw>(Channel::Ordered)
         .add_server_message::<ShotFx>(Channel::Unreliable)
         .add_mapped_server_message::<Damaged>(Channel::Ordered)
         .add_server_message::<HitConfirm>(Channel::Ordered)
         .add_server_message::<Respawn>(Channel::Ordered)
-        .add_server_message::<Feed>(Channel::Ordered);
+        .add_server_message::<Feed>(Channel::Ordered)
+        .add_server_message::<Exploded>(Channel::Ordered);
 }
 
 /// A player. `owner` is the netcode client id, or `0` for the host / offline player.
@@ -121,6 +125,37 @@ pub struct Fire {
 }
 
 /// Client -> server: I switched weapons (so others see it).
+/// A knife attack: a slash, or a heavy stab with right click.
+#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct Melee {
+    pub heavy: bool,
+    pub origin: Vec3,
+    pub dir: Vec3,
+}
+
+/// A grenade leaving the hand: a throw, or an underhand lob with right click.
+#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct Throw {
+    pub lob: bool,
+    pub origin: Vec3,
+    pub dir: Vec3,
+}
+
+/// A grenade in flight. The server simulates it and updates `pos`; clients
+/// draw it there.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]
+#[require(Transform, Visibility)]
+pub struct Projectile {
+    pub owner: u64,
+    pub pos: Vec3,
+}
+
+/// A grenade went off here.
+#[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct Exploded {
+    pub pos: Vec3,
+}
+
 #[derive(Message, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct SelectWeapon(pub WeaponKind);
 

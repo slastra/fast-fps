@@ -45,7 +45,12 @@ pub(super) fn plugin(app: &mut App) {
     .console_command("tp", "<x> <y> <z>", "teleport your character")
     .console_command("look", "<yaw> <pitch>", "set view angles in degrees")
     .console_command("spin", "<deg/s>", "turn steadily; 0 stops")
-    .console_command("fire", "[shots]", "pull the trigger from a script");
+    .console_command("fire", "[shots]", "pull the trigger from a script")
+    .console_command(
+        "fire_alt",
+        "[times]",
+        "right click from a script: knife stab, grenade lob",
+    );
 }
 
 #[derive(Resource, Default)]
@@ -118,7 +123,8 @@ fn scene_commands(
                     0.0,
                 ));
             }
-            "fire" => scripted_fire.0 += numbers.first().map_or(1, |n| *n as u32),
+            "fire" => scripted_fire.primary += numbers.first().map_or(1, |n| *n as u32),
+            "fire_alt" => scripted_fire.alt += numbers.first().map_or(1, |n| *n as u32),
             "spin" => spin.0 = numbers.first().copied().unwrap_or(0.0),
             _ => {}
         }

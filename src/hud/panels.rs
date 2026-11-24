@@ -61,8 +61,14 @@ pub fn weapon(
     let rounds = arsenal.ammo[arsenal.current.index()];
     let reloading = arsenal.reloading > 0.0;
     let low = rounds as f32 <= def.mag as f32 * 0.25;
+    // The knife has no ammo at all: show nothing rather than "0 / 0".
+    let counted = def.mag > 0;
 
-    let shown = rounds.to_string();
+    let shown = if counted {
+        rounds.to_string()
+    } else {
+        String::new()
+    };
     if ammo.0.0 != shown {
         ammo.0.0 = shown;
     }
@@ -75,7 +81,11 @@ pub fn weapon(
     } else {
         TEXT
     };
-    let of = format!("/ {}", def.mag);
+    let of = if counted {
+        format!("/ {}", def.mag)
+    } else {
+        String::new()
+    };
     if mag.0 != of {
         mag.0 = of;
     }
@@ -94,8 +104,10 @@ pub fn weapon(
     // The bar is the magazine; while reloading it fills back up.
     let fraction = if reloading {
         1.0 - arsenal.reloading / def.reload_secs
-    } else {
+    } else if counted {
         rounds as f32 / def.mag as f32
+    } else {
+        0.0
     };
     bar.0.width = percent(fraction.clamp(0.0, 1.0) * 100.0);
     bar.1.0 = if reloading || low { ACCENT } else { TEXT };

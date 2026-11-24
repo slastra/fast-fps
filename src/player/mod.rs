@@ -19,23 +19,38 @@ use bevy_ahoy::prelude::*;
 use bevy_replicon::prelude::*;
 
 use crate::{
-    config::{CROUCH_SPEED_SCALE, GRAVITY, JUMP_HEIGHT, KILL_HEIGHT, RUN_SPEED},
+    config::{CROUCH_SPEED_SCALE, GRAVITY, JUMP_HEIGHT, KILL_HEIGHT, KNIFE_SPEED_SCALE, RUN_SPEED},
     console::{ConsoleAppExt, ConsoleCommand, Print},
     net::{MoveInput, Pose, Respawn, Suicide},
     physics::Layer,
     player::input::PlayerInput,
     render::{self, WorldCamera},
-    weapon::Arsenal,
+    weapon::{Arsenal, WeaponKind},
 };
 
 pub(super) fn plugin(app: &mut App) {
     app.add_plugins((input::plugin, view::plugin))
         .add_systems(Startup, spawn_local_player)
         .add_systems(PreUpdate, apply_respawn.after(ClientSystems::Receive))
-        .add_systems(Update, (send_move, fall_out, player_commands));
+        .add_systems(Update, (send_move, fall_out, player_commands, knife_speed));
 
     app.console_command("kill", "", "respawn somewhere else")
         .console_command("pos", "", "print your position and view angles");
+}
+
+/// Run a little faster with the knife out, as in Counter-Strike.
+fn knife_speed(
+    arsenal: Res<Arsenal>,
+    mut controller: Single<&mut CharacterController, With<LocalPlayer>>,
+) {
+    let speed = if arsenal.current == WeaponKind::Knife {
+        RUN_SPEED * KNIFE_SPEED_SCALE
+    } else {
+        RUN_SPEED
+    };
+    if controller.speed != speed {
+        controller.speed = speed;
+    }
 }
 
 /// The kinematic character controller owned by this machine. Never replicated.

@@ -12,3 +12,4 @@ tests/harness/lan_host.cfg tests/harness/lan_client.cfg
 -s 1600x900 tests/harness/look.cfg
 # Only has to finish; frame rates are too machine-dependent to judge here.
 -t 240 tests/harness/bench.cfg
+tests/harness/knife_grenade.cfg

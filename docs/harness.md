@@ -138,8 +138,8 @@ allows a tiny rounding error); anything else compares as text, ignoring case, wi
 | `players` | everyone in the game, bots included |
 | `bots` | practice bots |
 | `health`, `kills`, `deaths` | yours |
-| `weapon` | `ak`, `mp5`, `glock`, `shotgun`, `sniper` |
-| `ammo` | rounds left in the current weapon |
+| `weapon` | `ak`, `mp5`, `glock`, `shotgun`, `sniper`, `knife`, `grenade` |
+| `ammo` | rounds left in the current weapon (the knife has 0, the grenade 1 or 0) |
 | `reloading`, `scoped` | `1` or `0` |
 | `spread` | your accuracy cone in degrees; bigger is less accurate |
 | `x`, `y`, `z`, `speed` | your body's position and horizontal speed |
@@ -147,6 +147,8 @@ allows a tiny rounding error); anything else compares as text, ignoring case, wi
 | `ragdolls` | corpses in the world, including ones fading out |
 | `decals` | bullet holes in the world |
 | `dummies_down` | practice dummies currently knocked over |
+| `grenades` | grenades in flight |
+| `explosions` | grenade explosions this machine has seen |
 | `sens`, `fov` | view settings |
 | `sky` | `night`, `dusk`, `dawn` or `day` |
 | `name`, `time`, `fps` | your name, game seconds since start, frame rate |

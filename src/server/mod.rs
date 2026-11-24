@@ -5,21 +5,24 @@
 //! hosting. Clients never run it; they see the results through replication.
 //!
 //! - [`players`]: joining, leaving, spawning, movement and hitboxes.
-//! - [`combat`]: turning a `Fire` message into damage and kills.
+//! - [`combat`]: turning `Fire` and `Melee` messages into damage and kills.
+//! - [`grenades`]: thrown grenades, their flight and their blast.
 //! - [`dummies`]: the practice targets.
 //! - [`bots`]: practice bots driven from the console.
 
 mod bots;
 mod combat;
 mod dummies;
+mod grenades;
 mod players;
 
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
 use crate::server::{
-    combat::{Died, receive_fire},
+    combat::{Died, receive_fire, receive_melee},
     dummies::{ensure_dummies, move_dummies, tick_downed},
+    grenades::{receive_throws, tick_grenades},
     players::{
         ensure_local_player, hitboxes_follow_pose, on_client_authorized, on_client_removed,
         receive_moves, receive_names, receive_select, receive_suicide,
@@ -37,8 +40,10 @@ pub(super) fn plugin(app: &mut App) {
                 receive_names,
                 receive_moves,
                 receive_fire,
+                receive_melee,
                 receive_select,
                 receive_suicide,
+                receive_throws,
             )
                 .chain()
                 .after(ServerSystems::Receive)
@@ -48,8 +53,11 @@ pub(super) fn plugin(app: &mut App) {
             FixedUpdate,
             (move_dummies, tick_downed).run_if(authority.clone()),
         )
-        .add_systems(Update, hitboxes_follow_pose.run_if(authority))
+        .add_systems(
+            Update,
+            (hitboxes_follow_pose, tick_grenades).run_if(authority),
+        )
         .add_observer(on_client_authorized)
         .add_observer(on_client_removed)
-        .add_plugins(bots::plugin);
+        .add_plugins((bots::plugin, grenades::plugin));
 }

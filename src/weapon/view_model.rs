@@ -11,7 +11,7 @@ use crate::{
     render::{WorldCamera, no_shadow},
     weapon::{
         VM_SCALE,
-        arsenal::{Arsenal, HideViewModel},
+        arsenal::{Arsenal, HideViewModel, Swing},
         defs::WeaponKind,
     },
 };
@@ -153,8 +153,10 @@ pub fn animate_gun(
     let model_rest = super::models::model(kind).rest;
     let moving = (player.0.with_y(0.0).length() / 8.0).clamp(0.0, 1.0);
 
+    // A thrown grenade has left the hand.
+    let empty_hand = kind == WeaponKind::Grenade && arsenal.ammo[kind.index()] == 0;
     for (gun, mut visibility) in &mut guns {
-        let want = if gun.0 == kind {
+        let want = if gun.0 == kind && !empty_hand {
             Visibility::Inherited
         } else {
             Visibility::Hidden
@@ -185,12 +187,23 @@ pub fn animate_gun(
     } else {
         0.0
     };
-    let target = (model_rest + bob + Vec3::new(0.0, -0.12 * reload_t - 0.25 * draw_t, 0.05 * kick))
+    let (swing_at, swing_turn) = swing_pose(&mut arsenal, dt);
+    let target = (model_rest
+        + bob
+        + swing_at
+        + Vec3::new(0.0, -0.12 * reload_t - 0.25 * draw_t, 0.05 * kick))
         * VM_SCALE;
-    root.0.translation.smooth_nudge(&target, 30.0, dt);
-    let rotation = Quat::from_rotation_x(0.08 * kick - 0.7 * reload_t - 0.9 * draw_t)
+    // Swings are quick, so follow them more tightly.
+    let rate = if arsenal.swing == Swing::None {
+        1.0
+    } else {
+        2.5
+    };
+    root.0.translation.smooth_nudge(&target, 30.0 * rate, dt);
+    let rotation = swing_turn
+        * Quat::from_rotation_x(0.08 * kick - 0.7 * reload_t - 0.9 * draw_t)
         * Quat::from_rotation_z(0.5 * reload_t);
-    root.0.rotation.smooth_nudge(&rotation, 25.0, dt);
+    root.0.rotation.smooth_nudge(&rotation, 25.0 * rate, dt);
 
     // Shotgun pump: slides back and forward after each shot.
     let pump_t = ((arsenal.since_pump - 0.15) / 0.45).clamp(0.0, 1.0);
@@ -211,6 +224,75 @@ pub fn animate_gun(
     flash.1.translation = muzzle + Vec3::Z * -0.1;
     light.1.translation = muzzle + Vec3::Z * -0.15;
     light.0.intensity = if lit { 60_000.0 } else { 0.0 };
+}
+
+/// How long each swing takes, in seconds.
+fn swing_secs(swing: Swing) -> f32 {
+    match swing {
+        Swing::None => 1.0,
+        Swing::Slash(_) => 0.3,
+        Swing::Stab => 0.5,
+        Swing::Throw => 0.65,
+    }
+}
+
+/// Advance the current knife or throw swing and return its offset from the
+/// rest position (model space) and its rotation.
+fn swing_pose(arsenal: &mut Arsenal, dt: f32) -> (Vec3, Quat) {
+    use std::f32::consts::PI;
+    if arsenal.swing == Swing::None {
+        return (Vec3::ZERO, Quat::IDENTITY);
+    }
+    arsenal.swing_t += dt / swing_secs(arsenal.swing);
+    let t = arsenal.swing_t;
+    if t >= 1.0 {
+        arsenal.swing = Swing::None;
+        return (Vec3::ZERO, Quat::IDENTITY);
+    }
+    let arc = (t * PI).sin();
+    match arsenal.swing {
+        Swing::None => (Vec3::ZERO, Quat::IDENTITY),
+        // Sweep across the view, edge leading, rolling into the cut.
+        Swing::Slash(side) => {
+            let across = 1.0 - 2.0 * t;
+            (
+                Vec3::new(across * side * 0.14, 0.03 * arc, -0.12 * arc),
+                Quat::from_rotation_y(-across * side * 0.9)
+                    * Quat::from_rotation_z(side * 0.7 * arc),
+            )
+        }
+        // Thrust straight ahead fast, draw back slowly.
+        Swing::Stab => {
+            let out = if t < 0.25 {
+                t / 0.25
+            } else {
+                1.0 - (t - 0.25) / 0.75
+            };
+            let out = out * out * (3.0 - 2.0 * out);
+            (
+                Vec3::new(-0.05 * out, 0.03 * out, -0.24 * out),
+                Quat::from_rotation_x(-0.25 * out),
+            )
+        }
+        // Pull back and up over the shoulder, then whip forward.
+        Swing::Throw => {
+            let back = 0.4;
+            if t < back {
+                let u = (t / back).powf(0.6);
+                (
+                    Vec3::new(0.04 * u, 0.14 * u, 0.2 * u),
+                    Quat::from_rotation_x(0.9 * u),
+                )
+            } else {
+                let u = (t - back) / (1.0 - back);
+                let snap = (u * PI).sin();
+                (
+                    Vec3::new(-0.04 * snap, -0.1 * u, -0.25 * snap),
+                    Quat::from_rotation_x(-0.6 * snap),
+                )
+            }
+        }
+    }
 }
 
 /// Guns for other players' bodies: one of each, only the held one visible.

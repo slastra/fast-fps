@@ -12,6 +12,7 @@ coding agents.
 ## Features
 
 - **Five guns** with fixed, learnable spray patterns, and a crosshair that shows your real accuracy
+- **A knife and a frag grenade**: slash, stab or backstab; throw or lob, and bounce it off walls
 - **Four skies**: night, dusk, dawn and day, switched live from the console
 - **A minimal HUD** whose weapon icons are rendered from the gun models themselves
 - **Animated players** with no keyframes: legs and arms are solved in code with inverse kinematics
@@ -48,8 +49,12 @@ rebuild quickly. If the game runs slowly, type `r_quality low` (or `medium`) in 
 ## Usage
 
 Click to grab the mouse. WASD to move, Space to jump (hold at a ledge to climb), Ctrl or C to
-crouch, left click to fire, right click to scope (sniper), R to reload, 1-5 or the wheel to
+crouch, left click to fire, right click to scope (sniper), R to reload, 1-7 or the wheel to
 switch weapons, Q for the last weapon, Tab for scores, Esc to release the mouse.
+
+6 is the knife: left click slashes, right click stabs, and any hit from behind kills. You
+run a little faster with it out. 7 is the grenade: left click throws, right click lobs. You
+get one per life.
 
 For something to shoot at, press `~` and type `exec cfg/bots.cfg`. To change the time of day,
 type `sky night`, `sky dusk`, `sky dawn`, `sky day`, or `sky next` to cycle.
@@ -105,6 +110,8 @@ scoped and standing still.
 | Glock | semi | 20 | 22 (70) |
 | Shotgun | pump | 8 | 9 x 17 (27) |
 | Sniper | bolt | 5 | 115 (230) |
+| Knife | slash / stab | | 50 / 65, from behind kills |
+| Grenade | 2.5 s fuse | 1 per life | 98 at the center, none past 7 m; walls block it |
 
 **Animation.** Other players are a jointed skeleton animated in code. Feet follow a stride
 cycle and legs are solved to them, so walking, strafing, backpedaling and crouch-walking come

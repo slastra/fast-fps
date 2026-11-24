@@ -38,7 +38,8 @@ src/
   server/        The rules. Runs when hosting or offline, never on a client.
     mod.rs         The order the rules run in each frame.
     players.rs     Joining, leaving, spawning, positions, hitboxes.
-    combat.rs      A shot arrives; decide what it hit and what that does.
+    combat.rs      A shot or knife swing arrives; decide what it hit and what that does.
+    grenades.rs    Thrown grenades: their flight, fuse and blast.
     dummies.rs     Practice targets.
     bots.rs        Practice bots and the `bot` commands.
 
@@ -47,14 +48,17 @@ src/
     input.rs       Key bindings and mouse capture.
     view.rs        The view rig, sensitivity, field of view.
 
-  weapon/        Guns.
-    defs.rs        Stats and spray patterns. Tune or add guns here.
-    models.rs      What each gun looks like.
+  weapon/        Guns, the knife and the grenade.
+    defs.rs        Stats and spray patterns. Tune or add weapons here.
+    models.rs      What each weapon looks like.
     arsenal.rs     What you're holding, switching, the scope.
     firing.rs      Accuracy, shooting, reloading, recoil.
+    knife.rs       Slashes and stabs.
+    throw.rs       Throwing the grenade.
     view_model.rs  The gun on your screen and in other players' hands.
     icons.rs       HUD icons, rendered from the gun models at startup.
     fx.rs          Tracers, sparks, bullet holes.
+    blast.rs       Grenades in flight and explosions, as everyone sees them.
 
   avatar/        Other players' bodies.
     rig.rs         The skeleton: eleven bones and their boxes.
@@ -103,6 +107,18 @@ Following one shot through the code shows how the pieces connect.
    own. `hud/panels.rs` just reads them.
 5. **`avatar/mod.rs` `damaged`** (every machine). On `Damaged` it knocks the victim's upper
    body, or on a kill builds a ragdoll at the position in the message.
+
+A knife swing takes the same road with a `Melee` message (`weapon/knife.rs`, then
+`receive_melee` in `server/combat.rs`). A grenade is different because it exists for a while:
+
+1. **`weapon/throw.rs`** winds the arm up, then sends `Throw`.
+2. **`server/grenades.rs` `receive_throws`** spawns a physics body with a fuse and a
+   replicated `Projectile`, so every client sees it fly (`weapon/blast.rs` gives it a model
+   and moves it to the replicated position).
+3. **`tick_grenades`** sets it off: everyone within range whom no wall shields takes damage
+   through the same `Hits` helper the guns use (`server/combat.rs`), so kills, the feed and
+   respawns follow one set of rules. Then `Exploded` goes to everyone for the flash, smoke,
+   scorch mark and bang.
 
 Two kinds of thing cross the network, both defined in `net/protocol.rs`:
 

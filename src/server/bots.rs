@@ -21,7 +21,7 @@ use crate::{
         combat::Died,
         players::{hitbox, pick_spawn},
     },
-    weapon::WeaponKind,
+    weapon::{Class, WeaponKind},
 };
 
 const JUMP_SPEED: f32 = 8.4;
@@ -189,10 +189,13 @@ fn bot_commands(
                 "pin" => bot.pinned = true,
                 "free" => bot.pinned = false,
                 "weapon" => match arg.and_then(WeaponKind::parse) {
-                    Some(kind) => loadout.0 = kind,
+                    Some(kind) if kind.def().class == Class::Gun => loadout.0 = kind,
+                    Some(_) => {
+                        print.write(Print::error("bots can only use guns"));
+                    }
                     None => {
                         print.write(Print::new(
-                            "bot_do <id> weapon <ak|mp5|glock|shotgun|sniper>",
+                            "bot_do <id> weapon <ak|mp5|glock|shotgun|sniper> (bots only use guns)",
                         ));
                     }
                 },

@@ -174,6 +174,19 @@ fn hold(weapon: WeaponKind) -> Hold {
             grip_l: Vec3::new(-0.03, -0.09, 0.03),
             blade: 0.0,
         },
+        // One-handed, low and forward; the free hand rests by the chest.
+        WeaponKind::Knife => Hold {
+            offset: Vec3::new(0.12, -0.02, -0.34),
+            grip_r: Vec3::new(0.0, -0.004, 0.01),
+            grip_l: Vec3::new(-0.24, -0.06, 0.16),
+            blade: 0.1,
+        },
+        WeaponKind::Grenade => Hold {
+            offset: Vec3::new(0.1, 0.06, -0.3),
+            grip_r: Vec3::new(0.0, -0.03, 0.01),
+            grip_l: Vec3::new(-0.22, -0.08, 0.12),
+            blade: 0.1,
+        },
     }
 }
 

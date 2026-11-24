@@ -13,6 +13,7 @@ use crate::{
         Score, SelectWeapon, SetName, Suicide,
     },
     physics::Layer,
+    server::combat::Died,
     world::SPAWNS,
 };
 
@@ -243,6 +244,7 @@ pub fn receive_suicide(
     mut respawns: MessageWriter<ToClients<Respawn>>,
     mut feed: MessageWriter<ToClients<Feed>>,
     mut damaged: MessageWriter<ToClients<Damaged>>,
+    mut died: MessageWriter<Died>,
 ) {
     for FromClient { client_id, .. } in requests.read() {
         let Some(entity) = find_player(*client_id, &clients) else {
@@ -269,6 +271,7 @@ pub fn receive_suicide(
             targets: SendTargets::All,
             message: Feed::Note(format!("{} gave up", name.0)),
         });
+        died.write(Died(entity));
         respawn(*client_id, &mut respawns);
     }
 }

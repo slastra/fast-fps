@@ -19,7 +19,7 @@ Launch arguments are console commands with a `+`: `cargo run -- +name alice +hos
 | `sens <value>` | Mouse sensitivity (default 0.07). Saved. |
 | `fov <degrees>` | Field of view (default 80). Saved. |
 | `sky [night\|dusk\|dawn\|day\|next]` | Time of day (default dusk). Saved. |
-| `weapon <ak\|mp5\|glock\|shotgun\|sniper>` | Switch weapons (also keys 1-5, the wheel, and Q). |
+| `weapon <ak\|mp5\|glock\|shotgun\|sniper\|knife\|grenade>` | Switch weapons (also keys 1-7, the wheel, and Q). |
 | `reload` | Reload (also R). |
 | `scoreboard <0\|1>` | Keep the scoreboard up (holding Tab also shows it). |
 | `zoom <level>` | Sniper scope level; 0 is unscoped (also right click). |
@@ -49,7 +49,8 @@ commands run at startup.
 | `tp <x> <y> <z>` | Teleport your character. |
 | `look <yaw> <pitch>` | Set view angles in degrees. |
 | `spin <deg/s>` | Turn steadily; 0 stops. |
-| `fire [shots]` | Pull the trigger from a script. |
+| `fire [shots]` | Pull the trigger from a script (a knife slash, a grenade throw). |
+| `fire_alt [times]` | Right click from a script: knife stab, grenade lob. |
 | `pos` | Print your position and view angles. |
 | `echo <text>`, `clear`, `help` | Print text, clear the console, list commands. |
 | `perf_reset` | Start a performance measurement. |

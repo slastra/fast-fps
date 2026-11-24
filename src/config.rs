@@ -25,6 +25,8 @@ pub const PROTOCOL_ID: u64 = fnv1a(GAME_NAME);
 pub const MAX_HEALTH: f32 = 100.0;
 /// Top running speed in m/s. Quake-fast by default.
 pub const RUN_SPEED: f32 = 12.0;
+/// Running speed with the knife out, as a multiple of [`RUN_SPEED`].
+pub const KNIFE_SPEED_SCALE: f32 = 1.1;
 /// Crouch-walking speed as a fraction of [`RUN_SPEED`].
 pub const CROUCH_SPEED_SCALE: f32 = 1.0 / 3.0;
 /// How high a jump goes, in meters.

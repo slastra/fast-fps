@@ -1,4 +1,5 @@
-//! Low-poly gun models built from boxes and cylinders.
+//! Low-poly weapon models (guns, the knife, the grenade) built from boxes
+//! and cylinders.
 //!
 //! Model space is meters at full size, -Z forward, origin near the trigger.
 //! The same parts are used for the first-person view model (scaled toward the
@@ -41,6 +42,8 @@ const WOOD: Color = Color::srgb(0.42, 0.22, 0.1);
 const DARK_WOOD: Color = Color::srgb(0.28, 0.15, 0.08);
 const POLYMER: Color = Color::srgb(0.07, 0.07, 0.08);
 const OLIVE: Color = Color::srgb(0.24, 0.27, 0.16);
+const STEEL: Color = Color::srgb(0.55, 0.57, 0.6);
+const DRAB: Color = Color::srgb(0.2, 0.24, 0.13);
 
 fn b(size: [f32; 3], at: [f32; 3], tilt: f32, color: Color) -> Part {
     Part {
@@ -150,6 +153,31 @@ pub fn model(kind: WeaponKind) -> GunModel {
             ],
             muzzle: Vec3::new(0.0, 0.02, -0.98),
             rest: Vec3::new(0.2, -0.2, -0.42),
+        },
+        // A fighting knife held blade forward: grip at the origin.
+        WeaponKind::Knife => GunModel {
+            parts: vec![
+                b([0.006, 0.036, 0.19], [0.0, 0.004, -0.15], 0.0, STEEL),
+                b([0.005, 0.024, 0.05], [0.0, 0.009, -0.265], 0.12, STEEL),
+                b([0.007, 0.006, 0.16], [0.0, 0.022, -0.14], 0.0, WORN),
+                b([0.03, 0.05, 0.014], [0.0, 0.0, -0.05], 0.0, METAL),
+                b([0.026, 0.034, 0.11], [0.0, -0.002, 0.01], 0.0, POLYMER),
+                b([0.03, 0.036, 0.016], [0.0, -0.002, 0.07], 0.0, METAL),
+            ],
+            muzzle: Vec3::new(0.0, 0.01, -0.29),
+            rest: Vec3::new(0.17, -0.17, -0.3),
+        },
+        // An egg-shaped frag with its spoon and pin, held at the fingertips.
+        WeaponKind::Grenade => GunModel {
+            parts: vec![
+                c(0.034, 0.07, [0.0, 0.0, 0.0], DRAB),
+                c(0.026, 0.09, [0.0, 0.0, 0.0], DRAB),
+                c(0.014, 0.022, [0.0, 0.0, -0.052], WORN),
+                b([0.012, 0.008, 0.075], [0.0, 0.036, -0.012], 0.0, WORN),
+                b([0.022, 0.004, 0.022], [0.026, 0.0, -0.055], 0.0, STEEL),
+            ],
+            muzzle: Vec3::new(0.0, 0.0, -0.06),
+            rest: Vec3::new(0.16, -0.15, -0.3),
         },
     }
 }

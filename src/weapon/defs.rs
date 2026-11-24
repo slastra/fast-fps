@@ -1,9 +1,10 @@
-//! Weapon stats and spray patterns.
+//! Weapon stats and spray patterns, plus the knife and the grenade.
 //!
 //! Angles are in degrees. A spray pattern is where shot N lands relative to
 //! where you aimed, x to the right and y up, if you don't pull against it.
 //! The patterns are hand-made keyframes, linearly interpolated per shot.
 
+use bevy::math::{Quat, Vec3};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
@@ -14,11 +15,22 @@ pub enum WeaponKind {
     Glock,
     Shotgun,
     Sniper,
+    Knife,
+    Grenade,
+}
+
+/// What kind of thing a weapon is. Guns shoot bullets; the knife and the
+/// grenade have their own rules (see [`KNIFE`] and [`GRENADE`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Class {
+    Gun,
+    Knife,
+    Grenade,
 }
 
 impl WeaponKind {
     /// How many weapons there are. Arrays indexed by weapon use this.
-    pub const COUNT: usize = 5;
+    pub const COUNT: usize = 7;
 
     pub const ALL: [WeaponKind; Self::COUNT] = [
         WeaponKind::Ak,
@@ -26,6 +38,8 @@ impl WeaponKind {
         WeaponKind::Glock,
         WeaponKind::Shotgun,
         WeaponKind::Sniper,
+        WeaponKind::Knife,
+        WeaponKind::Grenade,
     ];
 
     pub fn index(self) -> usize {
@@ -39,6 +53,8 @@ impl WeaponKind {
             "3" | "glock" | "pistol" => Some(Self::Glock),
             "4" | "shotgun" | "pump" => Some(Self::Shotgun),
             "5" | "sniper" | "awp" | "bolt" => Some(Self::Sniper),
+            "6" | "knife" => Some(Self::Knife),
+            "7" | "grenade" | "nade" | "he" | "frag" => Some(Self::Grenade),
             _ => None,
         }
     }
@@ -50,10 +66,13 @@ impl WeaponKind {
 
 pub struct WeaponDef {
     pub name: &'static str,
+    pub class: Class,
     /// Seconds between shots.
     pub interval: f32,
     /// Hold to fire, or one shot per click.
     pub automatic: bool,
+    /// Rounds per magazine. 0 means no ammo at all (the knife); the grenade
+    /// has one, refilled when you respawn rather than by reloading.
     pub mag: u32,
     pub reload_secs: f32,
     pub draw_secs: f32,
@@ -148,6 +167,7 @@ const GLOCK_PATTERN: &[(f32, f32, f32)] = &[
 const DEFS: [WeaponDef; WeaponKind::COUNT] = [
     WeaponDef {
         name: "AK",
+        class: Class::Gun,
         interval: 0.1,
         automatic: true,
         mag: 30,
@@ -172,6 +192,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
     },
     WeaponDef {
         name: "MP5",
+        class: Class::Gun,
         interval: 0.075,
         automatic: true,
         mag: 30,
@@ -196,6 +217,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
     },
     WeaponDef {
         name: "Glock",
+        class: Class::Gun,
         interval: 0.13,
         automatic: false,
         mag: 20,
@@ -220,6 +242,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
     },
     WeaponDef {
         name: "Shotgun",
+        class: Class::Gun,
         interval: 0.85,
         automatic: false,
         mag: 8,
@@ -244,6 +267,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
     },
     WeaponDef {
         name: "Sniper",
+        class: Class::Gun,
         interval: 1.45,
         automatic: false,
         mag: 5,
@@ -266,4 +290,156 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
         zoom: &[0.45, 0.16],
         scoped: 0.04,
     },
+    WeaponDef {
+        name: "Knife",
+        class: Class::Knife,
+        interval: KNIFE.slash_secs,
+        automatic: false,
+        mag: 0,
+        reload_secs: 0.0,
+        draw_secs: 0.4,
+        damage: KNIFE.slash,
+        head_mult: 1.0,
+        falloff_per_10m: 1.0,
+        pellets: 1,
+        pellet_spread: 0.0,
+        stand: 0.3,
+        moving: 0.0,
+        airborne: 0.0,
+        crouch_mult: 1.0,
+        per_shot: 0.0,
+        per_shot_max: 0.0,
+        recover_secs: 0.3,
+        pattern: &[],
+        kick: 0.0,
+        zoom: &[],
+        scoped: 0.0,
+    },
+    WeaponDef {
+        name: "Grenade",
+        class: Class::Grenade,
+        interval: 0.6,
+        automatic: false,
+        mag: 1,
+        reload_secs: 0.0,
+        draw_secs: 0.5,
+        damage: GRENADE.damage,
+        head_mult: 1.0,
+        falloff_per_10m: 1.0,
+        pellets: 1,
+        pellet_spread: 0.0,
+        stand: 0.3,
+        moving: 0.0,
+        airborne: 0.0,
+        crouch_mult: 1.0,
+        per_shot: 0.0,
+        per_shot_max: 0.0,
+        recover_secs: 0.3,
+        pattern: &[],
+        kick: 0.0,
+        zoom: &[],
+        scoped: 0.0,
+    },
 ];
+
+/// The knife. Left click slashes, right click stabs, and any hit from behind
+/// kills.
+pub struct Knife {
+    pub slash: f32,
+    pub slash_secs: f32,
+    pub stab: f32,
+    pub stab_secs: f32,
+    /// How far the blade reaches from the eye, in meters.
+    pub reach: f32,
+    /// Radius of the swept sphere, so a slash doesn't need pixel aim.
+    pub width: f32,
+    /// A hit counts as from behind when the victim faces this much the same
+    /// way as the attacker (dot product of their horizontal facings).
+    pub behind: f32,
+}
+
+pub const KNIFE: Knife = Knife {
+    slash: 50.0,
+    slash_secs: 0.4,
+    stab: 65.0,
+    stab_secs: 1.0,
+    reach: 1.8,
+    width: 0.25,
+    behind: 0.3,
+};
+
+impl Knife {
+    /// Whether an attacker aiming along `aim` hits someone facing `victim`
+    /// from behind. Both are directions; only their horizontal parts count.
+    pub fn is_behind(&self, aim: Vec3, victim_yaw: f32) -> bool {
+        let aim = aim.with_y(0.0).normalize_or_zero();
+        let facing = Quat::from_rotation_y(victim_yaw) * Vec3::NEG_Z;
+        aim.dot(facing) > self.behind
+    }
+}
+
+/// The frag grenade, Counter-Strike HE style: one per life.
+pub struct Grenade {
+    /// Throw speed with left click, and the underhand lob with right click.
+    pub throw_speed: f32,
+    pub lob_speed: f32,
+    /// Seconds from release to the bang.
+    pub fuse: f32,
+    /// Damage at the center, falling linearly to nothing at `radius`.
+    pub damage: f32,
+    pub radius: f32,
+    /// How much of its speed a bounce keeps.
+    pub bounce: f32,
+}
+
+pub const GRENADE: Grenade = Grenade {
+    throw_speed: 17.0,
+    lob_speed: 8.0,
+    fuse: 2.5,
+    damage: 98.0,
+    radius: 7.0,
+    bounce: 0.35,
+};
+
+impl Grenade {
+    /// Damage at `distance` meters from the blast, before walls are checked.
+    pub fn damage_at(&self, distance: f32) -> f32 {
+        (self.damage * (1.0 - distance / self.radius)).max(0.0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blast_falls_off_to_nothing() {
+        assert_eq!(GRENADE.damage_at(0.0), 98.0);
+        assert!((GRENADE.damage_at(3.5) - 49.0).abs() < 0.01);
+        assert_eq!(GRENADE.damage_at(7.0), 0.0);
+        assert_eq!(GRENADE.damage_at(8.0), 0.0);
+    }
+
+    #[test]
+    fn backstab_only_is_behind() {
+        // The victim faces -z (yaw 0).
+        assert!(KNIFE.is_behind(Vec3::NEG_Z, 0.0), "same way: behind");
+        assert!(!KNIFE.is_behind(Vec3::Z, 0.0), "face to face");
+        assert!(!KNIFE.is_behind(Vec3::X, 0.0), "from the side");
+        assert!(
+            KNIFE.is_behind(Vec3::new(0.3, -0.5, -1.0), 0.0),
+            "behind, aiming down"
+        );
+    }
+
+    #[test]
+    fn new_weapons_parse() {
+        assert_eq!(WeaponKind::parse("6"), Some(WeaponKind::Knife));
+        assert_eq!(WeaponKind::parse("knife"), Some(WeaponKind::Knife));
+        assert_eq!(WeaponKind::parse("7"), Some(WeaponKind::Grenade));
+        assert_eq!(WeaponKind::parse("nade"), Some(WeaponKind::Grenade));
+        for kind in WeaponKind::ALL {
+            assert_eq!(kind.def().class == Class::Gun, kind.index() < 5);
+        }
+    }
+}

@@ -40,13 +40,18 @@ Check: a script that runs the command and asserts the result.
 
 ## Add a weapon
 
-Weapons are a fixed list. The compiler will point at most places you miss.
+Weapons are a fixed list. The compiler will point at most places you miss. Each has a
+`class`: `Gun` (bullets, the steps below), `Knife` or `Grenade`. A new melee weapon or
+throwable needs its own input system beside `weapon/knife.rs` or `weapon/throw.rs` and a
+server handler like `receive_melee` (`server/combat.rs`) or `server/grenades.rs`, and should
+deal damage through `Hits` so kills and the feed work like every other weapon.
 
 1. **`src/weapon/defs.rs`**
    - add a variant to `enum WeaponKind`
    - add it to `ALL`, in the same position, and bump `COUNT`
    - add a line to `parse` (its names, and its slot number)
-   - add a `WeaponDef` to `DEFS`, **in the same position as in the enum**
+   - add a `WeaponDef` to `DEFS`, **in the same position as in the enum**, with
+     `class: Class::Gun`
    - optionally give it a spray pattern (a list of `(shot, x degrees, y degrees)` keyframes)
 2. **`src/weapon/models.rs`**: add its shape to `model` (boxes and cylinders, a muzzle point,
    and where it rests on screen).
