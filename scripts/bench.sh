@@ -55,7 +55,9 @@ if [ -n "$SETUP" ]; then
 fi
 scripts/harness.sh "${args[@]}" "$script" >/dev/null
 status=$?
-console=$TARGET/harness/latest/$(basename "$script" .cfg)/console.txt
+# The harness always writes under this checkout's target/, even when
+# CARGO_TARGET_DIR points the build somewhere else.
+console=target/harness/latest/$(basename "$script" .cfg)/console.txt
 [ -s "$console" ] || { echo "bench: the run produced no console output" >&2; exit 1; }
 
 mkdir -p "$TARGET/bench"
