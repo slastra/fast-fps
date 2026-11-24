@@ -118,8 +118,28 @@ use a release build.
 both averaged 120 fps, GPU about 3 ms, and nearly every second had a frame of about 16 ms.
 The game's own CPU time was 3-7 ms (p99 about 9 ms), against about 2 ms on the bench route,
 even while standing still. XWayland made no difference, so it isn't Bevy's Wayland frame
-pacing issue ([#21833](https://github.com/bevyengine/bevy/issues/21833)). Not yet profiled:
-the next step is a CPU trace of real play.
+pacing issue ([#21833](https://github.com/bevyengine/bevy/issues/21833)).
+
+**The limit is Bevy's render thread, and it scales with shadow views, not pixels or
+meshes.** A Chrome trace (`bevy/trace_chrome`) of a scripted run on `medium` showed the
+render thread busy about 9 ms of every frame: about 0.3 ms to run each shadow view's render
+schedule plus about 1.7 ms to submit some 80 command buffers, while the actual draw
+recording was small. Each point light with shadows is six views, each sun cascade one.
+
+The same spot at 1280x720, where the GPU needs only 1-2 ms (release, invisible display):
+
+| Setting | Frame ms |
+|---|---|
+| `high` (2 lamp shadows, campfire, 4 cascades) | 10.1-10.3 |
+| `high`, cascades 2 | 8.8 |
+| `high`, no lamp shadows | 7.0 |
+| `medium` | 8.2 |
+| `medium`, no lamp shadows, 1 cascade | 6.7 |
+| `low` (no point-light shadows) | 3.3 |
+
+So on any GPU, each shadow-casting point light costs roughly 1-1.5 ms of CPU a frame, and
+it is the main thing between this game and 200+ fps. The only cheaper way to get a lamp's
+shadow is a spot light (one view instead of six).
 
 ## Not measured yet
 
