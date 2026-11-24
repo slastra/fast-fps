@@ -10,10 +10,10 @@ Every source file starts with a comment saying what it is for. This page is the 
   spawning. "Server" includes playing offline: the same code runs either way.
 - **You move yourself.** Each machine simulates its own character and tells the server where
   it is. That trusts clients, which is fine among friends on a LAN.
-- **Looks are generated.** The map, the sky, the guns and their icons, the bodies and the
-  gunshots are all built from code at startup. The knife and grenade sounds are recordings
-  made with an AI model (`scripts/sounds.py`), embedded in the binary from `assets/sounds/`.
-  The only file loaded at run time is the HUD font.
+- **Looks are generated.** The map, the sky, the guns and their icons and the bodies are all
+  built from code at startup. The sounds are recordings made with an AI model
+  (`scripts/sounds.py`), embedded in the binary from `assets/sounds/`. The only file loaded at
+  run time is the HUD font.
 
 ## Folders
 
@@ -80,7 +80,7 @@ src/
     crosshair.rs   Accuracy crosshair, reload bar, scope.
     panels.rs      Health, weapon and ammo, slots, status, scoreboard.
     feed.rs        The kill feed.
-  sound/         Sound effects: synthesized at startup, or embedded recordings.
+  sound/         Sound effects, embedded from assets/sounds/.
   debug/         Commands for testing: screenshot, tp, look, r_* switches, and the probe
                  (state / assert / wait_until).
 

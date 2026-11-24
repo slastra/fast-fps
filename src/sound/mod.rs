@@ -1,20 +1,17 @@
-//! Sound effects. Most are synthesized into WAV buffers at startup (see
-//! [`synth`]). The knife and grenade sounds are recordings generated with an
-//! AI model by `scripts/sounds.py` and built into the binary from
-//! `assets/sounds/`, so the game still loads no audio files at run time.
+//! Sound effects. Every sound is a recording generated with an AI model
+//! (ByteDance Seed Audio) by `scripts/sounds.py`, trimmed and leveled into
+//! `assets/sounds/`, and built into the binary, so the game loads no audio
+//! files at run time.
 //!
-//! To add a sound: add a field to [`Sounds`], build or embed it in
-//! `make_sounds`, and call [`play`] where it should be heard.
-
-mod synth;
+//! To add a sound: make it with `scripts/sounds.py`, add a field to
+//! [`Sounds`], load it in `make_sounds`, and call [`play`] where it should be
+//! heard.
 
 use std::sync::Arc;
 
 use bevy::{audio::Volume, prelude::*};
 
 use crate::weapon::WeaponKind;
-
-use crate::sound::synth::{Gun, click, shot, silence, tone, wav, with_action};
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(PreStartup, make_sounds);
@@ -64,99 +61,29 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
             bytes: Arc::from(bytes),
         })
     };
-    let knife = load(recorded!("knife"));
-    let throw = load(recorded!("throw"));
-    let knife_flesh = load(recorded!("flesh"));
-    let knife_wall = load(recorded!("wall"));
-    let bounce = load(recorded!("bounce"));
-    let explode = load(recorded!("explode"));
-    let pin = load(recorded!("pin"));
-
-    let mut add = |samples: Vec<f32>| {
-        sources.add(AudioSource {
-            bytes: Arc::from(wav(&samples)),
-        })
-    };
     commands.insert_resource(Sounds {
+        // In `WeaponKind::ALL` order. The shotgun's pump and the sniper's
+        // bolt are mixed into their shots (`pump.wav`, `bolt.wav`).
         shots: [
-            // AK: heavy crack and a deep thump.
-            add(shot(Gun {
-                crack: 0.7,
-                body: 1.6,
-                thump_hz: 140.0,
-                thump: 0.8,
-                decay: 11.0,
-                secs: 0.34,
-                seed: 1,
-            })),
-            // MP5: lighter and quicker.
-            add(shot(Gun {
-                crack: 0.55,
-                body: 1.0,
-                thump_hz: 190.0,
-                thump: 0.45,
-                decay: 18.0,
-                secs: 0.22,
-                seed: 2,
-            })),
-            // Glock: snappy.
-            add(shot(Gun {
-                crack: 0.8,
-                body: 0.8,
-                thump_hz: 230.0,
-                thump: 0.4,
-                decay: 22.0,
-                secs: 0.2,
-                seed: 3,
-            })),
-            // Shotgun: a long boom, then the pump.
-            add(with_action(
-                shot(Gun {
-                    crack: 0.6,
-                    body: 2.2,
-                    thump_hz: 90.0,
-                    thump: 1.0,
-                    decay: 6.5,
-                    secs: 0.6,
-                    seed: 4,
-                }),
-                &[(0.32, 0.05), (0.52, 0.06)],
-            )),
-            // Sniper: a big crack with a rolling tail, then the bolt.
-            add(with_action(
-                shot(Gun {
-                    crack: 1.0,
-                    body: 2.4,
-                    thump_hz: 110.0,
-                    thump: 1.0,
-                    decay: 4.5,
-                    secs: 0.9,
-                    seed: 5,
-                }),
-                &[(0.62, 0.04), (0.78, 0.05), (0.98, 0.04)],
-            )),
-            // Knife: a quick swish through the air.
-            knife,
-            // Grenade: the arm's whoosh as it leaves the hand.
-            throw,
+            load(recorded!("ak")),
+            load(recorded!("mp5")),
+            load(recorded!("glock")),
+            load(recorded!("shotgun")),
+            load(recorded!("sniper")),
+            // The knife's swish, and the grenade leaving the hand.
+            load(recorded!("knife")),
+            load(recorded!("throw")),
         ],
-        zoom: add(click(0.015)),
-        hit: add(tone(&[(1900.0, 0.045)], 70.0)),
-        kill: add(tone(&[(880.0, 0.07), (1320.0, 0.16)], 18.0)),
-        click: add(click(0.025)),
-        reload: add([
-            click(0.03),
-            silence(0.35),
-            click(0.04),
-            silence(0.5),
-            click(0.03),
-        ]
-        .concat()),
-        knife_flesh,
-        knife_wall,
-        bounce,
-        explode,
-        pin,
+        zoom: load(recorded!("zoom")),
+        hit: load(recorded!("hit")),
+        kill: load(recorded!("kill")),
+        click: load(recorded!("click")),
+        reload: load(recorded!("reload")),
+        knife_flesh: load(recorded!("flesh")),
+        knife_wall: load(recorded!("wall")),
+        bounce: load(recorded!("bounce")),
+        explode: load(recorded!("explode")),
+        pin: load(recorded!("pin")),
     });
 }
 

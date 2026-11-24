@@ -55,7 +55,8 @@ deal damage through `Hits` so kills and the feed work like every other weapon.
    - optionally give it a spray pattern (a list of `(shot, x degrees, y degrees)` keyframes)
 2. **`src/weapon/models.rs`**: add its shape to `model` (boxes and cylinders, a muzzle point,
    and where it rests on screen).
-3. **`src/sound/mod.rs`**: add its shot sound to the `shots` array, in the same position.
+3. **`src/sound/mod.rs`**: add its shot sound to the `shots` array, in the same position
+   (make one as in "Add a sound" below).
 4. **`src/avatar/anim.rs`**: add it to `hold` (how other players hold it).
 5. **`src/avatar/ragdoll.rs`**: add it to `knock` (how hard it throws a body).
 6. Update the usage text of the `weapon` and `bot_do` commands (search for `sniper>`).
@@ -127,16 +128,17 @@ Check: `scripts/harness.sh -s 1600x900 tests/harness/look.cfg` and look at the s
 
 ## Add a sound
 
-1. Add a field to `Sounds` in `src/sound/mod.rs`.
-2. Make it one of two ways:
-   - **From code:** build it in `make_sounds` from the pieces in `src/sound/synth.rs` (`tone`,
-     `click`, `shot`, `silence`, joined with `concat`).
-   - **Recorded:** add a prompt to `SOUNDS` in `scripts/sounds.py`, then run
-     `scripts/sounds.py gen <name> -n 3` (needs `OPENROUTER_API_KEY`, a few cents). Listen to
-     the takes in `target/sounds/`, and `scripts/sounds.py use <name> <take>` trims and levels
-     the one you like into `assets/sounds/<name>.wav`. Load it in `make_sounds` with
-     `load(recorded!("<name>"))`. Keep recordings short; they are built into the binary.
-3. Play it with `play(&mut commands, &sounds.your_sound, volume)`.
+1. Add a prompt to `SOUNDS` in `scripts/sounds.py`: what it sounds like, the longest it may
+   run, and whether to keep only the first sound when the model makes several.
+2. Run `scripts/sounds.py gen <name> -n 3` for three takes (needs `OPENROUTER_API_KEY`; a take
+   costs a cent or two). Listen to them in `target/sounds/`, then `scripts/sounds.py use <name>
+   <take>` trims the one you like, levels it and writes `assets/sounds/<name>.wav`.
+3. Add a field to `Sounds` in `src/sound/mod.rs` and load it in `make_sounds` with
+   `load(recorded!("<name>"))`. Keep sounds short; they are built into the binary.
+4. Play it with `play(&mut commands, &sounds.your_sound, volume)`.
+
+The model puts follow-up noises (a pump, a bolt) seconds after the main sound, so make those
+on their own and mix them in: see `pump` and `bolt` in `scripts/sounds.py`.
 
 Check: by ear. The harness can't hear.
 
