@@ -36,8 +36,9 @@ Run it from this folder:
     ./$NAME
 
 Click to grab the mouse. WASD to move, Space to jump, Ctrl to crouch, left
-click to fire, R to reload, 1-5 to switch weapons, Tab for scores. Press ~
-for the console, where everything else lives:
+click to fire, R to reload, 1-5 for the guns, Tab for scores. 6 is the knife
+(right click stabs). 7 is the grenade: hold left click longer to throw it
+farther. Press ~ for the console, where everything else lives:
 
     host                 start a LAN game
     connect              join the first LAN game found (or: connect <ip>)
