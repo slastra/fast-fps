@@ -166,8 +166,9 @@ pub fn fire(
     .min(1.0);
 
     // Pattern offset for this shot, then random spread per pellet.
+    // A duelist who fires before the pistol is all the way up shoots low.
     let (px, py) = def.pattern_at(arsenal.spray);
-    let aim = rig.rotation() * offset(px, py);
+    let aim = rig.rotation() * offset(px, py - arsenal.low_deg());
     let cone = arsenal.inaccuracy;
     let mut dirs = Vec::with_capacity(def.pellets as usize);
     for _ in 0..def.pellets {

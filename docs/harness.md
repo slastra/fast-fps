@@ -154,6 +154,7 @@ allows a tiny rounding error); anything else compares as text, ignoring case, wi
 | `duel_round`, `duel_wins` | the round number, and the wins as `1-0` |
 | `duel_me`, `duel_slot` | `duelist`, `spectator` or `none`; your duelist slot `0` or `1` (`-1` if not dueling) |
 | `out`, `on_mark` | `1` if you're out of play (dead this round, or watching); `1` if you're standing on your mark |
+| `holstered`, `raised` | `1` while a duelist's pistol is still in the holster; how far it has come up since the draw, `0.00` to `1.00` |
 | `sens`, `fov` | view settings |
 | `sky` | `night`, `dusk`, `dawn` or `day` |
 | `name`, `time`, `fps` | your name, game seconds since start, frame rate |

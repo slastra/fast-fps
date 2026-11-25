@@ -18,11 +18,12 @@ pub fn crosshair(
     window: Single<&Window>,
     scale: Res<UiScale>,
     camera: Single<&Projection, With<WorldCamera>>,
-    mut root: Single<&mut Visibility, With<CrosshairRoot>>,
+    mut root: Single<(&mut Visibility, &mut Node), (With<CrosshairRoot>, Without<CrossBar>)>,
     mut bars: Query<(&CrossBar, &mut Node, &mut BackgroundColor)>,
 ) {
     marker.time = (marker.time - time.delta_secs()).max(0.0);
-    root.set_if_neq(if arsenal.scoped() {
+    let (visibility, root_node) = &mut *root;
+    visibility.set_if_neq(if arsenal.scoped() || arsenal.holstered() {
         Visibility::Hidden
     } else {
         Visibility::Inherited
@@ -33,8 +34,15 @@ pub fn crosshair(
     };
     // In window pixels, then into the HUD's scaled units.
     let half_height = window.height() / 2.0;
-    let cone = arsenal.inaccuracy.to_radians().tan() / (fov / 2.0).tan() * half_height;
-    let gap = (cone / scale.0).max(3.0);
+    let to_screen = |deg: f32| deg.to_radians().tan() / (fov / 2.0).tan() * half_height / scale.0;
+    let gap = to_screen(arsenal.inaccuracy).max(3.0);
+    // A duelist's pistol coming out of the holster: the crosshair rises from
+    // where a shot would land, fading in as it comes up.
+    let low = to_screen(arsenal.low_deg());
+    if root_node.top != px(low) {
+        root_node.top = px(low);
+    }
+    let fade = arsenal.raise();
 
     let hit = marker.time > 0.0;
     let color = match (hit, marker.kill) {
@@ -43,6 +51,7 @@ pub fn crosshair(
         _ if arsenal.reloading > 0.0 || arsenal.draw > 0.0 => TEXT.with_alpha(0.35),
         _ => TEXT.with_alpha(0.92),
     };
+    let color = color.with_alpha(color.alpha() * fade);
     for (bar, mut node, mut bg) in &mut bars {
         let (len, thick) = (8.0, 2.0);
         let (w, h) = if bar.0.x != 0.0 {

@@ -66,9 +66,11 @@ cloud of smoke, and three seconds to reload.
 
 Type `mode duel` on the host (or offline) for a flintlock duel, best of five. Each round, the
 two duelists start back to back in the yard south of the keep. Walk to your mark, the ring on
-the ground ahead of you. Once both of you are on your marks, the bell rings for "Draw!" a
-moment later: turn and fire. Shots before the bell don't count. A body hit leaves your
-opponent standing; a head hit doesn't. The first to win three rounds wins the duel, the winner
+the ground ahead of you. Once both of you are on your marks you're held there: you can lean
+aside but not walk off or jump. The bell rings for "Draw!" a moment later. Your pistol is in
+its holster until you press Space, then it comes up over half a second, the crosshair rising
+with it. Fire before it's all the way up and the shot goes low, so a fast draw is good and a
+hasty one hits the dirt. A body hit leaves your opponent standing; a head hit doesn't. The first to win three rounds wins the duel, the winner
 stays, and the next player in line steps up. Everyone else watches, unseen, until their turn.
 To practice alone, add a bot with `bot` (`bot_duel_aim 0` to `1` sets how well it shoots).
 `mode ffa` goes back to free-for-all.

@@ -68,6 +68,15 @@ pub const DUEL_ROUND_OVER_SECS: f32 = 3.0;
 pub const DUEL_OVER_SECS: f32 = 5.0;
 /// Where everyone who isn't dueling watches from: the yard's west edge.
 pub const DUEL_WATCH: Vec3 = Vec3::new(-9.5, 1.2, 15.0);
+/// From the bell until "Draw!" is over, a duelist can't leave their mark: the
+/// body stays within this distance of its center, in meters, and can't jump.
+/// That leaves room to lean aside, not to run.
+pub const DUEL_ROOM: f32 = 0.6;
+/// Seconds to bring the pistol up from the holster once you draw (Space).
+pub const DUEL_RAISE_SECS: f32 = 0.5;
+/// How far below your aim a shot goes if fired the moment you draw, in
+/// degrees. It shrinks to nothing as the pistol comes up.
+pub const DUEL_LOW_DEG: f32 = 25.0;
 
 // --- Corpses ---------------------------------------------------------------
 

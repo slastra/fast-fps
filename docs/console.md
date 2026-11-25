@@ -24,6 +24,7 @@ Launch arguments are console commands with a `+`: `cargo run -- +name alice +hos
 | `scoreboard <0\|1>` | Keep the scoreboard up (holding Tab also shows it). |
 | `zoom <level>` | Sniper scope level; 0 is unscoped (also right click). |
 | `kill` | Respawn somewhere else. In a duel, back to your start or watching spot. |
+| `draw` | In a duel, after "Draw!": draw your pistol (also Space). Fired before it's fully up, a shot goes low. |
 | `mode [ffa\|duel]` | The game mode (host or offline): free-for-all, or a flintlock duel. With no argument, prints the current one. |
 | `quit` | Exit. |
 

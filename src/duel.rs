@@ -5,15 +5,25 @@
 //! replicated [`Duel`] entity, so it works the same when hosting, offline and
 //! as a client. [`MyDuel`] sums up where this player stands, for the weapon
 //! code (no firing before "Draw!", flintlock only).
+//!
+//! It also runs the quick draw: a duelist's pistol stays in the holster
+//! until they press Space after "Draw!", then comes up over
+//! [`DUEL_RAISE_SECS`]. A shot fired on the way up goes low (see
+//! `Arsenal::low_deg`). From the moment both are steady until the round is
+//! decided, a duelist can't jump or leave their mark ([`DUEL_ROOM`]).
 
+use avian3d::prelude::*;
 use bevy::prelude::*;
+use bevy_ahoy::prelude::*;
 use bevy_replicon::prelude::*;
 
 use crate::{
-    config::{DUEL_MARK_RADIUS, DUEL_MARKS},
+    config::{DUEL_MARK_RADIUS, DUEL_MARKS, DUEL_RAISE_SECS, DUEL_ROOM, JUMP_HEIGHT},
+    console::{ConsoleAppExt, ConsoleCommand, Print},
     debug::probe::Probe,
     hud::{ACCENT, HudFont, TEXT, text},
     net::{Duel, DuelPhase, LocalId, Out, Player, PlayerName, SelectWeapon},
+    player::{GameInput, LocalPlayer},
     render::no_shadow,
     sound::{Sounds, play},
     weapon::{Arsenal, WeaponKind},
@@ -27,11 +37,23 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Startup, (make_marks, spawn_banners))
         .add_systems(
             PreUpdate,
-            (my_duel, weapon_rules)
+            (my_duel, quick_draw, weapon_rules)
                 .chain()
-                .after(ClientSystems::Receive),
+                .after(ClientSystems::Receive)
+                .after(bevy::input::InputSystems),
         )
-        .add_systems(Update, (hide_out, marks, banners, cues, probe));
+        .add_systems(
+            FixedPostUpdate,
+            hold_mark
+                .after(AhoySystems::MoveCharacters)
+                .before(PhysicsSystems::First),
+        )
+        .add_systems(Update, (no_jump, hide_out, marks, banners, cues, probe));
+    app.console_command(
+        "draw",
+        "",
+        "draw your pistol in a duel, after \"Draw!\" (also Space)",
+    );
 }
 
 /// This machine's place in the duel, if one is on.
@@ -51,6 +73,14 @@ impl MyDuel {
             None => true,
             Some(duel) => duel.phase == DuelPhase::Draw && self.slot.is_some() && !self.out,
         }
+    }
+
+    /// The mark this player is held on, if any: from the moment both
+    /// duelists are steady until the round is decided.
+    pub fn rooted(&self) -> Option<usize> {
+        let duel = self.duel.as_ref()?;
+        let held = matches!(duel.phase, DuelPhase::Steady | DuelPhase::Draw);
+        self.slot.filter(|_| held && !self.out)
     }
 }
 
@@ -79,7 +109,8 @@ fn weapon_rules(
     mut select: MessageWriter<SelectWeapon>,
 ) {
     let on = mine.duel.is_some();
-    let locked = !mine.may_fire();
+    // A holstered pistol can't fire either: draw first.
+    let locked = !mine.may_fire() || (on && !arsenal.drawing);
     if arsenal.flintlock_only != on || arsenal.locked != locked || arsenal.out != mine.out {
         arsenal.flintlock_only = on;
         arsenal.locked = locked;
@@ -87,6 +118,90 @@ fn weapon_rules(
     }
     if on && arsenal.select(WeaponKind::Flintlock) {
         select.write(SelectWeapon(WeaponKind::Flintlock));
+    }
+}
+
+/// The quick draw. Each round a duelist's pistol starts in the holster;
+/// after "Draw!", Space (or the `draw` command) brings it up.
+#[allow(clippy::too_many_arguments)]
+fn quick_draw(
+    time: Res<Time>,
+    input: Res<GameInput>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut cmds: MessageReader<ConsoleCommand>,
+    mine: Res<MyDuel>,
+    mut arsenal: ResMut<Arsenal>,
+    mut print: MessageWriter<Print>,
+    mut commands: Commands,
+    sounds: Res<Sounds>,
+) {
+    let asked = cmds.read().filter(|c| c.name == "draw").count() > 0;
+    let pressed = asked || (input.enabled && keys.just_pressed(KeyCode::Space));
+    let phase = mine.duel.as_ref().map(|d| d.phase);
+    let dueling = mine.slot.is_some() && !mine.out;
+    match phase {
+        // Not dueling: the gun is in hand as usual.
+        _ if !dueling => {
+            if arsenal.raised != 1.0 || arsenal.drawing {
+                arsenal.raised = 1.0;
+                arsenal.drawing = false;
+            }
+        }
+        Some(DuelPhase::Walk | DuelPhase::Steady) => {
+            if arsenal.raised != 0.0 || arsenal.drawing {
+                arsenal.raised = 0.0;
+                arsenal.drawing = false;
+            }
+        }
+        Some(DuelPhase::Draw) if pressed && !arsenal.drawing => {
+            arsenal.drawing = true;
+            play(&mut commands, &sounds.click, 0.35);
+        }
+        _ => {}
+    }
+    if asked && phase != Some(DuelPhase::Draw) {
+        print.write(Print("draw: wait for \"Draw!\"".into()));
+    }
+    if arsenal.drawing && arsenal.raised < 1.0 {
+        arsenal.raised = (arsenal.raised + time.delta_secs() / DUEL_RAISE_SECS).min(1.0);
+    }
+}
+
+/// Keep a duelist on their mark: they can lean aside, not walk off. Runs
+/// right after the character controller moves the body.
+fn hold_mark(
+    mine: Res<MyDuel>,
+    mut player: Single<(&mut Transform, &mut LinearVelocity), With<LocalPlayer>>,
+) {
+    let Some(slot) = mine.rooted() else {
+        return;
+    };
+    let mark = DUEL_MARKS[slot];
+    let (transform, velocity) = &mut *player;
+    let off = (transform.translation - mark).with_y(0.0);
+    let distance = off.length();
+    if distance <= DUEL_ROOM {
+        return;
+    }
+    let out = off / distance;
+    let at = mark + out * DUEL_ROOM;
+    transform.translation.x = at.x;
+    transform.translation.z = at.z;
+    let along = velocity.0.dot(out);
+    if along > 0.0 {
+        velocity.0 -= out * along;
+    }
+}
+
+/// No jumping off your mark: Space is for drawing.
+fn no_jump(mine: Res<MyDuel>, mut controller: Single<&mut CharacterController, With<LocalPlayer>>) {
+    let height = if mine.rooted().is_some() {
+        0.0
+    } else {
+        JUMP_HEIGHT
+    };
+    if controller.jump_height != height {
+        controller.jump_height = height;
     }
 }
 
@@ -372,8 +487,10 @@ fn cues(
 }
 
 /// Values for test scripts: `duel`, `duel_round`, `duel_wins`, `duel_me`,
-/// `duel_slot`, `out` and `on_mark`.
-fn probe(mine: Res<MyDuel>, local: Res<LocalId>, mut probe: ResMut<Probe>) {
+/// `duel_slot`, `out`, `on_mark`, `holstered` and `raised`.
+fn probe(mine: Res<MyDuel>, local: Res<LocalId>, arsenal: Res<Arsenal>, mut probe: ResMut<Probe>) {
+    probe.set("holstered", u8::from(arsenal.holstered()));
+    probe.set("raised", format!("{:.2}", arsenal.raised));
     let Some(duel) = &mine.duel else {
         probe.set("duel", "none");
         probe.set("duel_round", 0);

@@ -39,6 +39,8 @@ pub struct AvatarAnim {
     pub crouch: f32,
     pub air: f32,
     pub reload: f32,
+    /// 1 while a duelist's pistol is holstered, easing to 0 as it's drawn.
+    pub holster: f32,
     /// Aim pitch in radians, positive up.
     pub pitch: f32,
     /// 1 right after a shot, decaying to 0.
@@ -65,6 +67,7 @@ impl Default for AvatarAnim {
             crouch: 0.0,
             air: 0.0,
             reload: 0.0,
+            holster: 0.0,
             pitch: 0.0,
             recoil: 0.0,
             flinch: Vec2::ZERO,
@@ -112,6 +115,8 @@ pub fn advance(
         a.crouch.smooth_nudge(&flag(Pose::CROUCH), 12.0, dt);
         a.air.smooth_nudge(&flag(Pose::AIR), 16.0, dt);
         a.reload.smooth_nudge(&flag(Pose::RELOAD), 9.0, dt);
+        // About as quick as the draw itself (`DUEL_RAISE_SECS`).
+        a.holster.smooth_nudge(&flag(Pose::HOLSTER), 8.0, dt);
 
         let speed = Vec2::new(a.vel.x, a.vel.z).length();
         a.phase = (a.phase + stride_freq(speed) * smoothstep(0.1, 0.6, speed) * dt).fract();
@@ -310,8 +315,22 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
                     0.05 * a.recoil + 0.03 * reload,
                 ));
 
-    let right_hand = gun_pos + gun_rot * hold.grip_r;
     let support = gun_pos + gun_rot * hold.grip_l;
+    // Holstered: the hand rests at the right hip with the pistol hanging
+    // muzzle down, then swings it up into aim as it's drawn.
+    let holster = smoothstep(0.0, 1.0, a.holster);
+    let (gun_pos, gun_rot) = if holster > 0.0 {
+        let hip_hand = hips_pos + hips_rot * Vec3::new(0.27, -0.04, -0.02);
+        let hip_rot = hips_rot * Quat::from_rotation_x(-1.35);
+        let hip_gun = hip_hand - hip_rot * hold.grip_r;
+        (
+            gun_pos.lerp(hip_gun, holster),
+            gun_rot.slerp(hip_rot, holster),
+        )
+    } else {
+        (gun_pos, gun_rot)
+    };
+    let right_hand = gun_pos + gun_rot * hold.grip_r;
     // While reloading the support hand works the magazine.
     let magazine = gun_pos + gun_rot * Vec3::new(0.0, -0.2 + 0.04 * (a.time * 9.0).sin(), -0.14);
     let left_hand = support.lerp(magazine, reload);
@@ -395,7 +414,13 @@ mod tests {
                 Vec3::new(2.0, 8.0, -5.0),
                 Vec3::new(0.0, -20.0, 0.0),
             ] {
-                for (crouch, air, reload) in [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 1.0)] {
+                for (crouch, air, reload, holster) in [
+                    (0.0, 0.0, 0.0, 0.0),
+                    (1.0, 0.0, 0.0, 0.0),
+                    (0.0, 1.0, 1.0, 0.0),
+                    (0.0, 0.0, 0.0, 1.0),
+                    (1.0, 0.0, 0.0, 0.5),
+                ] {
                     for pitch in [-1.5, -0.4, 0.0, 0.9, 1.5] {
                         for phase in [0.0, 0.2, 0.5, 0.77] {
                             out.push(AvatarAnim {
@@ -404,6 +429,7 @@ mod tests {
                                 crouch,
                                 air,
                                 reload,
+                                holster,
                                 pitch,
                                 phase,
                                 recoil: 1.0,

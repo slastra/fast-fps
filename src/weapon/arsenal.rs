@@ -5,6 +5,7 @@ use bevy::{input::mouse::MouseWheel, prelude::*};
 use rand::{SeedableRng, rngs::StdRng};
 
 use crate::{
+    config::DUEL_LOW_DEG,
     console::{ConsoleCommand, Print},
     net::SelectWeapon,
     player::GameInput,
@@ -114,6 +115,12 @@ pub struct Arsenal {
     pub locked: bool,
     pub flintlock_only: bool,
     pub out: bool,
+    /// How far the gun is out of the holster, 0 to 1. Always 1 outside a
+    /// duel; a duelist starts each round at 0 and draws with Space after
+    /// "Draw!" (`duel.rs`).
+    pub raised: f32,
+    /// A duelist has drawn this round, so the pistol is coming up.
+    pub drawing: bool,
     pub rng: StdRng,
 }
 
@@ -143,6 +150,8 @@ impl Default for Arsenal {
             locked: false,
             flintlock_only: false,
             out: false,
+            raised: 1.0,
+            drawing: false,
             rng: StdRng::seed_from_u64(1),
         }
     }
@@ -174,6 +183,23 @@ impl Arsenal {
         self.charge = None;
         self.priming = None;
         true
+    }
+
+    /// The pistol is in its holster and hasn't been drawn.
+    pub fn holstered(&self) -> bool {
+        self.raised < 1.0 && !self.drawing
+    }
+
+    /// How far up the gun is, eased: 0 at the hip, 1 aimed.
+    pub fn raise(&self) -> f32 {
+        let t = self.raised.clamp(0.0, 1.0);
+        t * t * (3.0 - 2.0 * t)
+    }
+
+    /// How far below the aim a shot fired now goes, in degrees: a shot taken
+    /// before the pistol is all the way up hits low.
+    pub fn low_deg(&self) -> f32 {
+        DUEL_LOW_DEG * (1.0 - self.raise())
     }
 
     /// The weapon held before this one.

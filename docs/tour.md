@@ -24,7 +24,7 @@ src/
   physics.rs     Collision layers: who can touch whom.
   render.rs      The camera and its post-processing: bloom, shadows, anti-aliasing.
   sky.rs         The four times of day: sky dome, sun or moon, light, fog, exposure.
-  duel.rs        The duel as you see it: marks on the ground, banners, the bell.
+  duel.rs        The duel as you see it: marks, banners, the bell, the quick draw.
   lowpoly.rs     The shape kit: beveled blocks, crates, barrels, rocks, pines, grass.
 
   console/       The drop-down console. The whole user interface.

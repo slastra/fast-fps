@@ -15,7 +15,7 @@ use bevy_replicon::prelude::*;
 use rand::Rng;
 
 use crate::{
-    config::{DUEL_MARKS, GRAVITY, MAX_HEALTH, SHOT_RANGE},
+    config::{DUEL_MARKS, DUEL_RAISE_SECS, GRAVITY, MAX_HEALTH, SHOT_RANGE},
     console::{ConsoleAppExt, ConsoleCommand, Print},
     net::{Duel, DuelPhase, Health, Loadout, Out, Player, PlayerName, Pose, Score, ShotFx},
     physics::Layer,
@@ -34,8 +34,10 @@ const EYE: f32 = 0.8;
 const WALK: f32 = 3.2;
 /// How fast a dueling bot turns to face its opponent, radians per second.
 const TURN: f32 = 7.0;
-/// A dueling bot's reaction to "Draw!", in seconds (random in this range).
-const REACTION: (f32, f32) = (0.45, 0.8);
+/// How long a dueling bot takes to react to "Draw!" and reach for its
+/// pistol, in seconds (random in this range). It then takes the same
+/// `DUEL_RAISE_SECS` as a player to bring it up before it fires.
+const REACTION: (f32, f32) = (0.2, 0.45);
 
 /// How often a dueling bot's shot is on target, 0 (never) to 1 (always).
 #[derive(Resource)]
@@ -105,6 +107,8 @@ pub struct Bot {
     goal: Option<Vec3>,
     /// Seconds left before a dueling bot fires, once "Draw!" is called.
     react: Option<f32>,
+    /// A dueling bot's pistol is still in the holster.
+    holster: bool,
 }
 
 impl Bot {
@@ -119,6 +123,7 @@ impl Bot {
         self.shots = 0;
         self.goal = None;
         self.react = None;
+        self.holster = false;
     }
 }
 
@@ -204,6 +209,7 @@ fn bot_commands(
                     pitch: 0.0,
                     goal: None,
                     react: None,
+                    holster: false,
                 },
             ));
             print.write(Print(format!(
@@ -379,6 +385,7 @@ fn drive(
         next.set(Pose::CROUCH, bot.crouch);
         next.set(Pose::AIR, airborne);
         next.set(Pose::RELOAD, bot.reload > 0.0);
+        next.set(Pose::HOLSTER, bot.holster);
         *pose = next;
     }
 }
@@ -402,12 +409,14 @@ fn duel_bots(
         let Some(slot) = duel.slot(player.owner).filter(|_| !out) else {
             bot.goal = None;
             bot.react = None;
+            bot.holster = false;
             continue;
         };
         loadout.set_if_neq(Loadout(WeaponKind::Flintlock));
         match duel.phase {
             DuelPhase::Walk | DuelPhase::Steady => {
                 bot.react = None;
+                bot.holster = true;
                 if bot.goal.is_none() && !on_mark(slot, bot.home) {
                     bot.goal = Some(DUEL_MARKS[slot]);
                 }
@@ -429,9 +438,12 @@ fn duel_bots(
                 bot.pitch = (to.y / to.with_y(0.0).length().max(0.1)).atan();
                 let react = bot
                     .react
-                    .unwrap_or_else(|| rng.random_range(REACTION.0..REACTION.1))
+                    .unwrap_or_else(|| rng.random_range(REACTION.0..REACTION.1) + DUEL_RAISE_SECS)
                     - dt;
                 bot.react = Some(react);
+                if react < DUEL_RAISE_SECS {
+                    bot.holster = false;
+                }
                 if react > 0.0 || bot.reload > 0.0 {
                     continue;
                 }

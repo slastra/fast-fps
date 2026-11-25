@@ -67,7 +67,7 @@ pub struct Pose {
     pub pitch: f32,
     /// World-space velocity, used to animate the body.
     pub vel: Vec3,
-    /// `Pose::CROUCH | Pose::AIR | Pose::RELOAD`.
+    /// `Pose::CROUCH | Pose::AIR | Pose::RELOAD | Pose::HOLSTER`.
     pub flags: u8,
 }
 
@@ -75,6 +75,8 @@ impl Pose {
     pub const CROUCH: u8 = 1;
     pub const AIR: u8 = 2;
     pub const RELOAD: u8 = 4;
+    /// A duelist's pistol is still in the holster, at the hip.
+    pub const HOLSTER: u8 = 8;
 
     pub fn has(&self, flag: u8) -> bool {
         self.flags & flag != 0

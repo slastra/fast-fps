@@ -114,6 +114,7 @@ fn send_move(
     pose.set(Pose::CROUCH, state.crouching);
     pose.set(Pose::AIR, state.grounded.is_none());
     pose.set(Pose::RELOAD, arsenal.reloading > 0.0);
+    pose.set(Pose::HOLSTER, arsenal.holstered());
     moves.write(MoveInput(pose));
 }
 

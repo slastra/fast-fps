@@ -188,11 +188,18 @@ pub fn animate_gun(
     } else {
         0.0
     };
+    // A duelist's pistol starts in the holster, below the bottom of the
+    // screen, muzzle down, and swings up into aim as it's drawn.
+    let holster_t = 1.0 - arsenal.raise();
     let (swing_at, swing_turn) = swing_pose(&mut arsenal, dt);
     let target = (model_rest
         + bob
         + swing_at
-        + Vec3::new(0.0, -0.12 * reload_t - 0.25 * draw_t, 0.05 * kick))
+        + Vec3::new(
+            0.06 * holster_t,
+            -0.12 * reload_t - 0.25 * draw_t - 0.34 * holster_t,
+            0.05 * kick + 0.12 * holster_t,
+        ))
         * VM_SCALE;
     // Swings are quick, so follow them more tightly.
     let rate = if arsenal.swing == Swing::None {
@@ -202,7 +209,7 @@ pub fn animate_gun(
     };
     root.0.translation.smooth_nudge(&target, 30.0 * rate, dt);
     let rotation = swing_turn
-        * Quat::from_rotation_x(0.08 * kick - 0.7 * reload_t - 0.9 * draw_t)
+        * Quat::from_rotation_x(0.08 * kick - 0.7 * reload_t - 0.9 * draw_t - 1.0 * holster_t)
         * Quat::from_rotation_z(0.5 * reload_t);
     root.0.rotation.smooth_nudge(&rotation, 25.0 * rate, dt);
 
