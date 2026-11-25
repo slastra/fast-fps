@@ -19,6 +19,8 @@
 //! | `--port <n>` | UDP port to listen on (default `DEFAULT_PORT`) |
 //! | `--public <host:port>` | the address clients reach it at, for connect tokens |
 //! | `--idle <secs>` | exit after this long empty (default `IDLE_SECS`) |
+//! | `--owned` | exit when stdin closes: started by the lobby, which is gone |
+//! | `--protocol` | print `@fastfps protocol netcode=<id> replicon=<hash>` and exit |
 //!
 //! With `FASTFPS_KEY` set (64 hex characters) only clients holding a connect
 //! token signed with that key can join; without it anyone can, as on a LAN.
@@ -33,9 +35,9 @@ use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
 use crate::{
-    config::{DEFAULT_PORT, IDLE_SECS},
+    config::{DEFAULT_PORT, IDLE_SECS, MAX_CLIENTS, PROTOCOL_ID},
     console::{Console, Print},
-    net::{Duel, HostOptions, Player, start_server},
+    net::{Duel, HostOptions, Player, protocol_text, start_server},
     server::PlayerClient,
 };
 
@@ -50,6 +52,10 @@ pub struct Dedicated {
     /// The connect token key. `None` accepts anyone.
     pub key: Option<[u8; 32]>,
     pub idle_secs: f32,
+    /// Exit when stdin closes (`--owned`).
+    pub owned: bool,
+    /// Only say which protocol this build speaks, then exit (`--protocol`).
+    pub protocol_only: bool,
 }
 
 impl Dedicated {
@@ -85,11 +91,14 @@ impl Dedicated {
             None => IDLE_SECS,
         };
         let key = key.filter(|k| !k.is_empty()).map(parse_key).transpose()?;
+        let flag = |name: &str| args.iter().any(|a| a == name);
         Ok(Some(Self {
             port,
             public,
             key,
             idle_secs,
+            owned: flag("--owned"),
+            protocol_only: flag("--protocol"),
         }))
     }
 }
@@ -109,15 +118,21 @@ pub fn parse_key(hex: &str) -> Result<[u8; 32], String> {
 }
 
 pub(super) fn plugin(app: &mut App) {
+    if app.world().resource::<Dedicated>().protocol_only {
+        app.add_systems(Startup, say_protocol);
+        return;
+    }
     let (send, lines) = mpsc::channel();
     // Lines typed into the server's terminal, or written by the lobby.
+    // `None` means stdin closed.
     std::thread::spawn(move || {
         for line in std::io::stdin().lock().lines() {
             let Ok(line) = line else { break };
-            if send.send(line).is_err() {
-                break;
+            if send.send(Some(line)).is_err() {
+                return;
             }
         }
+        let _ = send.send(None);
     });
     app.insert_resource(Stdin(Mutex::new(lines)))
         .add_systems(Startup, host)
@@ -126,7 +141,17 @@ pub(super) fn plugin(app: &mut App) {
 }
 
 #[derive(Resource)]
-struct Stdin(Mutex<mpsc::Receiver<String>>);
+struct Stdin(Mutex<mpsc::Receiver<Option<String>>>);
+
+/// For the lobby, which hands out tokens for this build and checks that
+/// players' games speak the same protocol.
+fn say_protocol(hash: Res<ProtocolHash>, mut exit: MessageWriter<AppExit>) {
+    announce(&format!(
+        "protocol netcode={PROTOCOL_ID} replicon={}",
+        protocol_text(&hash)
+    ));
+    exit.write(AppExit::Success);
+}
 
 /// One line on stdout for the lobby, flushed at once.
 fn announce(line: &str) {
@@ -160,7 +185,7 @@ fn host(
                 "dedicated server on UDP {} ({secure})",
                 dedicated.port
             )));
-            announce(&format!("ready port={}", dedicated.port));
+            announce(&format!("ready port={} max={MAX_CLIENTS}", dedicated.port));
         }
         Err(e) => {
             print.write(Print::error(format!("could not host: {e}")));
@@ -170,11 +195,23 @@ fn host(
     }
 }
 
-fn read_stdin(stdin: Res<Stdin>, mut console: ResMut<Console>) {
+fn read_stdin(
+    stdin: Res<Stdin>,
+    dedicated: Res<Dedicated>,
+    mut console: ResMut<Console>,
+    mut exit: MessageWriter<AppExit>,
+) {
     let Ok(lines) = stdin.0.lock() else { return };
     while let Ok(line) = lines.try_recv() {
-        if !line.trim().is_empty() {
-            console.exec(line);
+        match line {
+            Some(line) if !line.trim().is_empty() => console.exec(line),
+            Some(_) => {}
+            // The lobby that started this game has gone.
+            None if dedicated.owned => {
+                announce("exit orphaned");
+                exit.write(AppExit::Success);
+            }
+            None => {}
         }
     }
 }
@@ -247,6 +284,11 @@ mod tests {
         assert_eq!(d.public, Some("127.0.0.1:27100".parse().unwrap()));
         assert_eq!(d.idle_secs, 5.0);
         assert_eq!(d.key, Some([0xab; 32]));
+        assert!(!d.owned && !d.protocol_only);
+        let d = Dedicated::from_args(&args("--dedicated --owned --protocol"), None)
+            .unwrap()
+            .unwrap();
+        assert!(d.owned && d.protocol_only);
     }
 
     #[test]

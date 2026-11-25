@@ -11,6 +11,7 @@
 //! - [`bots`]: practice bots driven from the console.
 //! - [`duel`]: the duel game mode (`mode duel`).
 
+mod admin;
 mod bots;
 mod combat;
 mod duel;
@@ -67,5 +68,5 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_observer(on_client_authorized)
         .add_observer(on_client_removed)
-        .add_plugins((bots::plugin, duel::plugin, grenades::plugin));
+        .add_plugins((admin::plugin, bots::plugin, duel::plugin, grenades::plugin));
 }

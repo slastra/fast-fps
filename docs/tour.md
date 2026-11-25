@@ -19,7 +19,9 @@ Every source file starts with a comment saying what it is for. This page is the 
 
 ```
 src/
-  main.rs        Assembles the app from the plugins below. Nothing else.
+  main.rs        Assembles the app from the plugins below: the game, or with
+                 --dedicated, a headless server. Nothing else.
+  dedicated.rs   The headless server: options, stdin console, status lines.
   config.rs      The game's name and the numbers you are most likely to tune.
   physics.rs     Collision layers: who can touch whom.
   render.rs      The camera and its post-processing: bloom, shadows, anti-aliasing.
@@ -37,6 +39,8 @@ src/
     protocol.rs    Everything sent over the network. Start here.
     session.rs     host / connect / disconnect / status / name.
     discovery.rs   Finding games on the LAN.
+    lobby.rs       lobby / games / create / join: playing online.
+    admin.rs       Sending host-only commands to the server you're on.
 
   server/        The rules. Runs when hosting or offline, never on a client.
     mod.rs         The order the rules run in each frame.
@@ -46,6 +50,7 @@ src/
     dummies.rs     Practice targets.
     bots.rs        Practice bots and the `bot` commands. Dueling bots fire back.
     duel.rs        The duel game mode (`mode duel`): rounds, marks, who's in and out.
+    admin.rs       Who runs a dedicated server's game, and their commands from afar.
 
   player/        The character you control.
     mod.rs         Spawning it, reporting its position, respawning.
@@ -85,6 +90,10 @@ src/
   sound/         Sound effects, embedded from assets/sounds/.
   debug/         Commands for testing: screenshot, tp, look, r_* switches, and the probe
                  (state / assert / wait_until).
+
+lobby/           The online lobby: a small program of its own, no Bevy. Lists games,
+                 starts a dedicated server for each, hands out connect tokens.
+Dockerfile       The lobby and the headless game in one image, for hosting.
 
 scripts/
   harness.sh     Run console scripts against the game; PASS or FAIL.
@@ -143,6 +152,14 @@ Two kinds of thing cross the network, both defined in `net/protocol.rs`:
 The switch is one run condition, `in_state(ClientState::Disconnected)`, read as "this machine
 is not a client". When you `connect`, your local world is thrown away and replaced by the
 server's (`net/session.rs`).
+
+A **dedicated server** (`fast-fps --dedicated`, `dedicated.rs`) is the Host column with nobody
+sitting at it: the `server/` rules and the world's colliders, with no window, GPU, sound,
+HUD or player of its own. Only `console`, `net`, `world`, `server` and `dedicated` are
+added (`main.rs`). So **server code must not need the local player**: anything in `server/`
+that reads `LocalPlayer`, the camera or a HUD resource has to cope with it being absent, or
+the dedicated server panics or quietly does nothing. `tests/harness/dedicated_*.cfg` and
+`online_*.cfg` catch that.
 
 ## Each frame, roughly
 

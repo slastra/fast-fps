@@ -312,8 +312,8 @@ fn mode_command(
             print.write(Print(format!("mode: {current}")));
             continue;
         };
+        // On a client, `net/admin.rs` sends it to the server instead.
         if *state.get() != ClientState::Disconnected {
-            print.write(Print::error("only the host can change the mode"));
             continue;
         }
         if wanted == current {

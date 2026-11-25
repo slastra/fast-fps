@@ -17,3 +17,5 @@ tests/harness/flintlock.cfg
 tests/harness/duel.cfg
 # Two clients on a dedicated server (fast-fps --dedicated), dueling.
 -S "--port 27591 +mode duel" tests/harness/dedicated_a.cfg tests/harness/dedicated_b.cfg
+# Online: the lobby starts a game, two players join it with tokens and duel.
+-L tests/harness/online_a.cfg tests/harness/online_b.cfg

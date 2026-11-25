@@ -20,6 +20,10 @@
 #   -S ARGS   first start a dedicated server, `fast-fps --dedicated ARGS`, for
 #             the scripts to connect to (e.g. -S "--port 27591"). Its output
 #             goes to server/server.log, and the run fails if it panics.
+#   -L        first start the online lobby (lobby/) on 127.0.0.1:8099, with a
+#             test key and game ports 27560-27561; scripts use it with
+#             `lobby http://127.0.0.1:8099`. Its output, and its games', goes
+#             to lobby/lobby.log, and the run fails if anything panics.
 #   -h        this help
 #
 # An instance passes when its script reached `quit`, the game printed no
@@ -45,8 +49,9 @@ TIMEOUT=120
 SIZE=1280x720
 CONFIG_BASE=""
 SERVER_ARGS=""
-usage() { sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; }
-while getopts "vwt:s:c:S:h" opt; do
+LOBBY=0
+usage() { sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; }
+while getopts "vwt:s:c:S:Lh" opt; do
     case $opt in
     v) MODE=nested ;;
     w) MODE=window ;;
@@ -54,6 +59,7 @@ while getopts "vwt:s:c:S:h" opt; do
     s) SIZE=$OPTARG ;;
     c) CONFIG_BASE=$(realpath -m "$OPTARG") ;;
     S) SERVER_ARGS=$OPTARG ;;
+    L) LOBBY=1 ;;
     h) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
     esac
@@ -118,8 +124,9 @@ HOST_WAYLAND=${WAYLAND_DISPLAY:-}
 GAME_PIDS=()
 SWAY_PIDS=()
 SERVER_PID=""
+LOBBY_PID=""
 cleanup() {
-    for pid in "${GAME_PIDS[@]:-}" "${SWAY_PIDS[@]:-}" "$SERVER_PID"; do
+    for pid in "${GAME_PIDS[@]:-}" "${SWAY_PIDS[@]:-}" "$SERVER_PID" "$LOBBY_PID"; do
         [ -n "$pid" ] && kill "$pid" 2>/dev/null
     done
     wait 2>/dev/null
@@ -174,6 +181,34 @@ if [ -n "$SERVER_ARGS" ]; then
         exit 2
     fi
     echo "started dedicated server ($SERVER_ARGS)"
+fi
+
+# The online lobby. Its games are dedicated servers it starts itself, and
+# they exit when it does.
+if [ $LOBBY = 1 ]; then
+    if ! cargo build -q -p lobby; then
+        echo "harness: lobby build failed" >&2
+        exit 2
+    fi
+    mkdir -p "$RUN_DIR/lobby"
+    LOBBY_LOG=$RUN_DIR/lobby/lobby.log
+    env "LD_LIBRARY_PATH=$LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "BEVY_ASSET_ROOT=$ASSETS" "XDG_CONFIG_HOME=$RUN_DIR/lobby/config" \
+        "FASTFPS_KEY=$(printf '5a%.0s' $(seq 32))" "FASTFPS_BIN=$BIN" \
+        PUBLIC_HOST=127.0.0.1 GAME_PORTS=27560-27561 LOBBY_ADDR=127.0.0.1:8099 \
+        GAME_IDLE=6 "$TARGET/debug/lobby" </dev/null >"$LOBBY_LOG" 2>&1 &
+    LOBBY_PID=$!
+    for _ in $(seq 100); do
+        grep -q '^lobby on ' "$LOBBY_LOG" 2>/dev/null && break
+        kill -0 "$LOBBY_PID" 2>/dev/null || break
+        sleep 0.2
+    done
+    if ! grep -q '^lobby on ' "$LOBBY_LOG"; then
+        echo "harness: the lobby did not start, see $LOBBY_LOG" >&2
+        tail -5 "$LOBBY_LOG" >&2
+        exit 2
+    fi
+    echo "started lobby"
 fi
 
 NAMES=()
@@ -322,6 +357,19 @@ if [ -n "$SERVER_ARGS" ]; then
         echo "$server_problems" | sed 's/^/      /' | tee -a "$REPORT"
     else
         say "PASS  dedicated server"
+    fi
+fi
+
+if [ $LOBBY = 1 ]; then
+    sed -i 's/\x1b\[[0-9;]*m//g' "$LOBBY_LOG"
+    lobby_problems=$(grep -E 'panicked at| ERROR ' "$LOBBY_LOG" |
+        grep -v 'Sub app did not exist' | cut -c1-240 | head -5)
+    if [ -n "$lobby_problems" ]; then
+        overall=1
+        say "FAIL  lobby  ($LOBBY_LOG)"
+        echo "$lobby_problems" | sed 's/^/      /' | tee -a "$REPORT"
+    else
+        say "PASS  lobby"
     fi
 fi
 

@@ -28,8 +28,8 @@ step() {
 }
 
 step "format (cargo fmt --check)" cargo fmt --all -- --check
-step "lint (cargo clippy)" cargo clippy --all-targets -- -D warnings
-step "unit tests (cargo test)" cargo test
+step "lint (cargo clippy)" cargo clippy --workspace --all-targets -- -D warnings
+step "unit tests (cargo test)" cargo test --workspace
 
 if [ $QUICK = 1 ]; then
     step "harness: smoke" scripts/harness.sh tests/harness/smoke.cfg

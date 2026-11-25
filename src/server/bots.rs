@@ -147,8 +147,8 @@ fn bot_commands(
         if cmd.name != "bot" && cmd.name != "bot_do" && cmd.name != "bot_duel_aim" {
             continue;
         }
+        // On a client, `net/admin.rs` sends it to the server instead.
         if *state.get() != ClientState::Disconnected {
-            print.write(Print::error("bots only work when hosting or offline"));
             continue;
         }
         if cmd.name == "bot_duel_aim" {

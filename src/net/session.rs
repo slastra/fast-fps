@@ -11,8 +11,8 @@ use bevy_replicon::prelude::*;
 use bevy_replicon_renet2::{
     RenetChannelsExt,
     netcode::{
-        ClientAuthentication, NativeSocket, NetcodeClientTransport, NetcodeServerTransport,
-        ServerAuthentication, ServerSetupConfig,
+        ClientAuthentication, ConnectToken, NativeSocket, NetcodeClientTransport,
+        NetcodeServerTransport, ServerAuthentication, ServerSetupConfig,
     },
     renet2::{ConnectionConfig, RenetClient, RenetServer},
 };
@@ -292,6 +292,24 @@ fn start_client(
     };
     let transport = NetcodeClientTransport::new(now(), authentication, NativeSocket::new(socket)?)?;
     // UDP is unreliable, so renet does its own resends.
+    commands.insert_resource(RenetClient::new(connection_config(channels), false));
+    commands.insert_resource(transport);
+    Ok(client_id)
+}
+
+/// Join a server with a connect token from the lobby (`net/lobby.rs`).
+/// Returns the player id the token was made for.
+pub fn start_client_secure(
+    commands: &mut Commands,
+    channels: &RepliconChannels,
+    token: ConnectToken,
+) -> Result<u64, Box<dyn std::error::Error>> {
+    let client_id = token.client_id;
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
+    let authentication = ClientAuthentication::Secure {
+        connect_token: token,
+    };
+    let transport = NetcodeClientTransport::new(now(), authentication, NativeSocket::new(socket)?)?;
     commands.insert_resource(RenetClient::new(connection_config(channels), false));
     commands.insert_resource(transport);
     Ok(client_id)

@@ -88,6 +88,19 @@ connect                 joins the first server found
 connect 192.168.1.20    or name it
 ```
 
+To play online, the game talks to a lobby: a small server that lists games and starts a new one
+for whoever asks. Press `~`, then:
+
+```
+games                   lists the games running in the lobby
+create duel Fast hands  starts a game (ffa or duel) and joins it
+join fast               joins a game by name (or by its number in the list)
+```
+
+Whoever creates a game runs it: `mode`, `bot` and the other host commands work for them as if
+they were hosting. An empty game shuts itself down after two minutes. `lobby <url>` points the
+game at a different lobby; [docs/online.md](docs/online.md) explains how to run one.
+
 Launch arguments are console commands too: `cargo run -- +name alice +host`.
 [docs/console.md](docs/console.md) lists every command.
 

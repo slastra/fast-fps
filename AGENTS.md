@@ -50,6 +50,8 @@ scripts/new-game.sh ~/Projects/Rust/my-game   # start a new game from this one
 | Keys and mouse | `src/player/input.rs` |
 | The HUD | `src/hud/` |
 | Console commands for testing | `src/debug/` |
+| The headless server (`--dedicated`) | `src/dedicated.rs`, `src/main.rs` |
+| Online play: the lobby and its commands | `lobby/`, `src/net/lobby.rs`, `docs/online.md` |
 
 ## Rules of this codebase
 
@@ -57,6 +59,11 @@ scripts/new-game.sh ~/Projects/Rust/my-game   # start a new game from this one
   in `src/server/`, guarded by `run_if(in_state(ClientState::Disconnected))`. That condition
   means "this machine is not a client", so it covers both hosting and offline play. A client
   only *asks*, by sending a message defined in `src/net/protocol.rs`.
+- **Server code must not need the local player.** The same `src/server/` code runs in a
+  dedicated server (`fast-fps --dedicated`), which has no `LocalPlayer`, camera, HUD, sky or
+  sound. Anything server-side that reads those must cope with them being absent. Visual-only
+  plugins are left out of the dedicated app in `src/main.rs` (and `world::plugin` skips its
+  lamps and dummy dressing there).
 - **Everything on the wire lives in `src/net/protocol.rs`** and is registered in its
   `register` function. Client and server must register the same things in the same order.
 - **Console commands are the interface.** Register one with `app.console_command(name, usage,
@@ -110,6 +117,9 @@ Each of these cost real debugging time once.
   Compare `gpu ms` and `cpu ms` between runs. Trust fps only from `bench.sh --window`.
 - **A render diagnostic keeps its last value after its pass stops running.** `perf` only counts
   fresh measurements for that reason; keep it that way if you touch `debug/perf.rs`.
+- **A dev build can't be run directly.** It links Bevy as a shared library, so
+  `target/debug/fast-fps` fails with "cannot open shared object file". Use `cargo run --`, or
+  set `LD_LIBRARY_PATH` as `scripts/harness.sh` does. Release builds don't have this problem.
 - **Two instances can't share a UDP port.** The LAN scenario uses 27555 so it can run beside a
   real game on the default 27015.
 
@@ -149,6 +159,8 @@ more. That is the engine compiling, once. Until it finishes there is nothing to 
 - How aiming, recoil and movement *feel* with a real mouse.
 - Sound.
 - Two physical machines on a real network (the LAN scenario runs both sides on localhost).
+- Online play over the internet: latency, packet loss, players' home routers. The online
+  scenario runs the lobby, its games and both players on localhost.
 - Frame rate on other hardware.
 
 Say so when a change touches one of these, instead of reporting it verified.

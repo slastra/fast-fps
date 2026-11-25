@@ -15,6 +15,10 @@ Launch arguments are console commands with a `+`: `cargo run -- +name alice +hos
 | `disconnect` | Leave the server, or stop hosting. |
 | `find` | Look for servers on the LAN. |
 | `status` | Show connection and scores. |
+| `lobby [url]` | Show or set the online lobby (default `https://fps.lastra.us`). Saved. |
+| `games` | List the games in the lobby. |
+| `create [ffa\|duel] [name]` | Start a game in the lobby and join it. You run it: the host-only commands work for you. |
+| `join <id\|name>` | Join a game in the lobby, by its number or (the start of) its name. |
 | `name <name>` | Set your player name. Saved. |
 | `sens <value>` | Mouse sensitivity (default 0.07). Saved. |
 | `fov <degrees>` | Field of view (default 80). Saved. |
@@ -25,7 +29,7 @@ Launch arguments are console commands with a `+`: `cargo run -- +name alice +hos
 | `zoom <level>` | Sniper scope level; 0 is unscoped (also right click). |
 | `kill` | Respawn somewhere else. In a duel, back to your start or watching spot. |
 | `draw` | In a duel, after "Draw!": draw your pistol (also Space). Fired before it's fully up, a shot goes low. |
-| `mode [ffa\|duel]` | The game mode (host or offline): free-for-all, or a flintlock duel. With no argument, prints the current one. |
+| `mode [ffa\|duel]` | The game mode (host or offline, or whoever runs an online game): free-for-all, or a flintlock duel. With no argument, prints the current one. |
 | `quit` | Exit. |
 
 Saved settings live in `~/.config/<game name>/config.cfg`, which is itself a list of console
@@ -35,7 +39,7 @@ commands run at startup.
 
 | Command | |
 |---|---|
-| `bot [x y z yaw]` | Spawn a practice bot (host or offline). With no arguments: 5 m in front of you. |
+| `bot [x y z yaw]` | Spawn a practice bot (host or offline, or whoever runs an online game). With no arguments: 5 m in front of you, or at a spawn point online. |
 | `bot_do <id\|all> <order> [arg]` | `idle walk run strafe back crouch stand jump reload fire weapon look pin free remove` |
 | `bot_duel_aim <0..1>` | How often a dueling bot hits: 0 never, 1 always (default 0.5). In a duel, bots walk to their marks and fire back on their own. |
 

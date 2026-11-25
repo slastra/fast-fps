@@ -12,8 +12,14 @@ bevy_enhanced_input = "0.27"
 bevy_replicon = "0.45"
 bevy_replicon_renet2 = { version = "1.0.1", features = ["native_transport"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ehttp = { version = "0.7", features = ["json"] }
 rand = "0.9"
 tracing = { version = "0.1", features = ["max_level_debug", "release_max_level_warn"] }
+
+[workspace]
+# The lobby (`lobby/`) is its own small program, with no Bevy in it.
+members = ["lobby"]
 
 [features]
 default = ["dev"]

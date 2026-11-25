@@ -68,6 +68,8 @@ target/harness/<run>/
 | `-v` | Watch: show each instance in a nested sway window on your desktop. |
 | `-w` | Use ordinary windows on your desktop. No sway needed, but screenshot size is whatever the window manager gives. |
 | `-c DIR` | Use this settings folder instead of a fresh one, to test that settings survive a restart. |
+| `-S "ARGS"` | First start a dedicated server, `fast-fps --dedicated ARGS`, for the scripts to `connect` to. Its output goes to `server/server.log`; a panic there fails the run. |
+| `-L` | First start the online lobby on `127.0.0.1:8099` (test key, game ports 27560-27561, games idle out after 6 s). Scripts use it with `lobby http://127.0.0.1:8099`. Its output and its games' go to `lobby/lobby.log`; a panic there fails the run. |
 
 Several scripts in one command start several game instances, in order, each once the one
 before it has loaded. That is how multiplayer is tested:
@@ -155,6 +157,7 @@ allows a tiny rounding error); anything else compares as text, ignoring case, wi
 | `duel_me`, `duel_slot` | `duelist`, `spectator` or `none`; your duelist slot `0` or `1` (`-1` if not dueling) |
 | `out`, `on_mark` | `1` if you're out of play (dead this round, or watching); `1` if you're standing on your mark |
 | `holstered`, `raised` | `1` while a duelist's pistol is still in the holster; how far it has come up since the draw, `0.00` to `1.00` |
+| `lobby_games` | how many games the online lobby listed, the last time anything asked it (`games`, `join`) |
 | `sens`, `fov` | view settings |
 | `sky` | `night`, `dusk`, `dawn` or `day` |
 | `name`, `time`, `fps` | your name, game seconds since start, frame rate |
@@ -233,6 +236,12 @@ quit                                  wait_until mode == offline 5
 
 Use a port other than 27015 so the test can run while a real game is hosting.
 
+A dedicated server has no script of its own: give it commands as launch arguments
+(`-S "--port 27591 +mode duel"`), and check it from the clients. The first player to arrive
+runs the game, so their `mode` and `bot` commands work. Online scripts start with `lobby
+http://127.0.0.1:8099`, and `wait_until lobby_games == 1` after `games` waits for the
+lobby's answer.
+
 To test a binary that is already built (a release build, say) instead of building one:
 
 ```sh
@@ -254,6 +263,10 @@ HARNESS_BIN=target/release/fast-fps scripts/harness.sh tests/harness/smoke.cfg
 | `look.cfg` | The same views under all four skies, plus close-ups. For looking at. |
 | `lan_host.cfg` + `lan_client.cfg` | A client joins, sees the host's bots, kills one, and both sides see the corpse. |
 | `settings_save.cfg` then `settings_load.cfg` | Settings survive a restart (they share a `-c` folder). |
+| `knife_grenade.cfg`, `flintlock.cfg` | The knife, the grenade and the flintlock: damage, smoke, the spark delay. |
+| `duel.cfg` | A duel against bots: the marks, the hold, the quick draw, a low shot, rounds to 3-1, the next duelist. |
+| `dedicated_a.cfg` + `dedicated_b.cfg` (`-S`) | Two players duel on a headless dedicated server; the first runs it and ends the duel. |
+| `online_a.cfg` + `online_b.cfg` (`-L`) | One player starts a duel in the lobby, the other finds and joins it, they play a round, and the empty game shuts down. |
 
 ## When it doesn't work
 

@@ -37,8 +37,34 @@ pub(super) fn register(app: &mut App) {
         .add_server_message::<Feed>(Channel::Ordered)
         .add_server_message::<Exploded>(Channel::Ordered)
         .replicate::<Duel>()
-        .replicate::<Out>();
+        .replicate::<Out>()
+        .add_client_message::<AdminCommand>(Channel::Ordered)
+        .add_server_message::<ConsoleReply>(Channel::Ordered);
 }
+
+/// A build's Replicon protocol hash as text, for the lobby's version check:
+/// a game and a server built from different code can't play together.
+pub fn protocol_text(hash: &ProtocolHash) -> String {
+    // The hash has no getter; its debug form is `ProtocolHash(<number>)`.
+    format!("{hash:?}")
+        .chars()
+        .filter(char::is_ascii_digit)
+        .collect()
+}
+
+/// Commands only whoever runs the game may use: the host on a LAN, or the
+/// player who created a game on a dedicated server (`server/admin.rs`).
+/// A client sends them to the server as an [`AdminCommand`].
+pub const ADMIN_COMMANDS: [&str; 4] = ["mode", "bot", "bot_do", "bot_duel_aim"];
+
+/// Client -> server: a console line from [`ADMIN_COMMANDS`], to run there.
+#[derive(Message, Serialize, Deserialize, Clone, Debug)]
+pub struct AdminCommand(pub String);
+
+/// Server -> one client: a line for their console, such as the answer to an
+/// [`AdminCommand`].
+#[derive(Message, Serialize, Deserialize, Clone, Debug)]
+pub struct ConsoleReply(pub String);
 
 /// A player. `owner` is the netcode client id, or `0` for the host / offline player.
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]

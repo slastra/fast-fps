@@ -8,8 +8,12 @@
 //! - [`protocol`]: everything that crosses the wire. Start here.
 //! - [`session`]: hosting, connecting and leaving.
 //! - [`discovery`]: finding servers on the LAN.
+//! - [`admin`]: sending host-only commands to the server you're on.
+//! - [`lobby`]: finding, starting and joining games online.
 
+mod admin;
 mod discovery;
+mod lobby;
 mod protocol;
 mod session;
 
@@ -20,5 +24,10 @@ use bevy::prelude::*;
 
 pub(super) fn plugin(app: &mut App) {
     protocol::register(app);
-    app.add_plugins((session::plugin, discovery::plugin));
+    app.add_plugins((
+        session::plugin,
+        discovery::plugin,
+        admin::plugin,
+        lobby::plugin,
+    ));
 }
