@@ -30,10 +30,11 @@ RUN cargo build --release --no-default-features -p fast-fps \
     && cargo build --release -p lobby
 
 FROM debian:trixie-slim
-# What the game program loads, even with no window or sound to use them.
+# What the game program loads, even with no window or sound to use them,
+# plus curl for health checks (Coolify runs its own with curl or wget).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        libasound2t64 libudev1 libwayland-client0 libffi8 ca-certificates \
+        libasound2t64 libudev1 libwayland-client0 libffi8 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/target/release/fast-fps /src/target/release/lobby /app/
 COPY assets /app/assets
@@ -42,5 +43,5 @@ ENV LOBBY_ADDR=0.0.0.0:8080 \
     GAME_PORTS=27100-27107 \
     BEVY_ASSET_ROOT=/app
 EXPOSE 8080/tcp 27100-27107/udp
-HEALTHCHECK --interval=30s --timeout=3s CMD ["/bin/bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+HEALTHCHECK --interval=30s --timeout=3s CMD ["curl", "-fsS", "http://127.0.0.1:8080/health"]
 CMD ["/app/lobby"]
