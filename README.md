@@ -102,7 +102,8 @@ they were hosting. An empty game shuts itself down after two minutes. `lobby <ur
 game at a different lobby; [docs/online.md](docs/online.md) explains how to run one.
 
 You can also play in a browser with WebGPU (a recent Chrome or Edge) at
-[fps.lastra.us](https://fps.lastra.us/), against bots for now. Crouch is C there, since Ctrl+W
+[fps.lastra.us](https://fps.lastra.us/): against bots, or online with the same `games`,
+`create` and `join`, in the same games as the native version. Crouch is C there, since Ctrl+W
 closes the tab. [docs/web.md](docs/web.md) has the details.
 
 Launch arguments are console commands too: `cargo run -- +name alice +host`.

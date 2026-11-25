@@ -253,7 +253,16 @@ HARNESS_BIN=target/release/fast-fps scripts/harness.sh tests/harness/smoke.cfg
 `scripts/web-harness.sh` runs the same scripts in the browser version, in Chrome, with the
 same rules for passing; `-c DIR` shares the browser's storage between scripts, like `-c` here.
 [web.md](web.md) explains it. `smoke.cfg`, `duel.cfg`, `web.cfg` and the settings pair pass
-there.
+there. With `-L` the page comes from a local lobby, for online scripts: `web_online.cfg` plays
+a duel over WebTransport against a bot.
+
+A browser and a native player in one game take both harnesses at once (not in the suite, which
+runs one thing at a time):
+
+```sh
+scripts/web-harness.sh -L tests/harness/mixed_browser.cfg &
+sleep 25; scripts/harness.sh tests/harness/mixed_native.cfg
+```
 
 ## The scenarios that ship
 

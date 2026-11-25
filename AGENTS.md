@@ -52,6 +52,7 @@ scripts/new-game.sh ~/Projects/Rust/my-game   # start a new game from this one
 | Console commands for testing | `src/debug/` |
 | The headless server (`--dedicated`) | `src/dedicated.rs`, `src/main.rs` |
 | Online play: the lobby and its commands | `lobby/`, `src/net/lobby.rs`, `docs/online.md` |
+| How connections are opened (UDP, WebTransport for browsers) | `src/net/transport.rs` |
 | The browser version, and anything that differs there | `src/platform.rs`, `web/`, `docs/web.md` |
 
 ## Rules of this codebase
@@ -171,7 +172,7 @@ more. That is the engine compiling, once. Until it finishes there is nothing to 
 - Sound.
 - Two physical machines on a real network (the LAN scenario runs both sides on localhost).
 - Online play over the internet: latency, packet loss, players' home routers. The online
-  scenario runs the lobby, its games and both players on localhost.
+  scenarios run the lobby, its games and the players on localhost, browser players included.
 - Frame rate on other hardware, and in browsers other than Chrome.
 - How the browser version feels and sounds. `scripts/web-harness.sh` runs scripts in Chrome,
   but nobody is holding the mouse.

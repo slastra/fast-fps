@@ -1,9 +1,9 @@
 # The browser version
 
 The game also builds for the web: the same code compiled to WebAssembly, drawing with WebGPU.
-It is served at `https://fps.lastra.us/` by the lobby (see [online.md](online.md)), and plays
-offline against bots. Multiplayer in the browser needs a WebSocket transport, which isn't
-built yet.
+It is served at `https://fps.lastra.us/` by the lobby (see [online.md](online.md)). It plays
+offline against bots, and online through the lobby (`games`, `create`, `join`) over
+WebTransport, in the same games as players of the native version.
 
 ## Playing
 
@@ -50,12 +50,16 @@ version in `Cargo.toml` and the `getrandom_backend` flag that `scripts/web.sh` s
 | Launch lines | `+command` arguments | `?c=` in the URL |
 | `exec` | reads the file | fetches it from the server; the script waits |
 | Mouse capture | Bevy's state | asks the page, which lets go on Esc by itself |
+| The lobby | `DEFAULT_LOBBY` | the server the page came from |
 
 Elsewhere:
 
-- **No UDP, no files, no threads.** `host`, `connect` and `find` say multiplayer isn't in the
-  browser yet (`net/transport.rs`). The dedicated server isn't built in. `quit` stops the game
-  but can't close the tab.
+- **No UDP, no files, no threads.** The browser joins games through the lobby only, over
+  WebTransport (`net/transport.rs`): `host`, `connect` and `find` say so. The page's lobby is
+  the server it came from. The dedicated server isn't built in. `quit` stops the game but
+  can't close the tab.
+- **WebTransport with a certificate hash** is needed to play online: Chrome and Edge have it.
+  Other browsers get a plain message saying so.
 - **Nothing is loaded at run time.** The sounds and the HUD font are built into the program.
 - **`std::time::Instant` panics in a browser.** Use `bevy::platform::time::Instant`.
 - **Sound starts on the first click.** Browsers keep audio off until the page is clicked;
@@ -89,6 +93,8 @@ Chrome inside an invisible sway (a real GPU, which WebGPU needs), through Playwr
 (`scripts/web-harness/`, run with bun). It judges a run exactly as `scripts/harness.sh`
 does. The game prints its console to the browser's console with a `[fast-fps] ` prefix,
 which becomes `console.txt`; `screenshot` saves arrive as downloads. `-n` skips the build,
-`-v` shows the browser in a window.
+`-v` shows the browser in a window. With `-L` the page comes from a local lobby instead, so
+online scripts work: `scripts/web-harness.sh -L tests/harness/web_online.cfg` starts a duel
+over WebTransport and beats a bot.
 
 CI checks that the game still compiles for wasm (`.github/workflows/ci.yaml`).

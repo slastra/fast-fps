@@ -5,7 +5,7 @@
 //! reports on stdout for whoever started it (the lobby, in `lobby/`):
 //!
 //! ```text
-//! @fastfps ready port=27100
+//! @fastfps ready port=27100 max=16 wt=27200 cert=<sha-256 of its certificate>
 //! @fastfps status players=2 mode=duel
 //! ```
 //!
@@ -19,6 +19,7 @@
 //! | `--port <n>` | UDP port to listen on (default `DEFAULT_PORT`) |
 //! | `--public <host:port>` | the address clients reach it at, for connect tokens |
 //! | `--idle <secs>` | exit after this long empty (default `IDLE_SECS`) |
+//! | `--webtransport <port>` | also take browser players over WebTransport on this UDP port |
 //! | `--owned` | exit when stdin closes: started by the lobby, which is gone |
 //! | `--protocol` | print `@fastfps protocol netcode=<id> replicon=<hash>` and exit |
 //!
@@ -56,6 +57,8 @@ pub struct Dedicated {
     /// The connect token key. `None` accepts anyone.
     pub key: Option<[u8; 32]>,
     pub idle_secs: f32,
+    /// A UDP port for browser players over WebTransport (`--webtransport`).
+    pub webtransport: Option<u16>,
     /// Exit when stdin closes (`--owned`).
     pub owned: bool,
     /// Only say which protocol this build speaks, then exit (`--protocol`).
@@ -95,12 +98,17 @@ impl Dedicated {
             None => IDLE_SECS,
         };
         let key = key.filter(|k| !k.is_empty()).map(parse_key).transpose()?;
+        let webtransport = match value("--webtransport")? {
+            Some(p) => Some(p.parse().map_err(|_| format!("bad --webtransport '{p}'"))?),
+            None => None,
+        };
         let flag = |name: &str| args.iter().any(|a| a == name);
         Ok(Some(Self {
             port,
             public,
             key,
             idle_secs,
+            webtransport,
             owned: flag("--owned"),
             protocol_only: flag("--protocol"),
         }))
@@ -177,19 +185,24 @@ fn host(
         public: dedicated.public,
         // Only an open server is for the LAN to find.
         beacon: dedicated.key.is_none(),
+        webtransport: dedicated.webtransport,
     };
     match start_server(&mut commands, &channels, &options) {
-        Ok(()) => {
+        Ok(cert) => {
             let secure = if dedicated.key.is_some() {
                 "secure"
             } else {
                 "open"
             };
-            print.write(Print(format!(
-                "dedicated server on UDP {} ({secure})",
-                dedicated.port
-            )));
-            announce(&format!("ready port={} max={MAX_CLIENTS}", dedicated.port));
+            let mut ready = format!("ready port={} max={MAX_CLIENTS}", dedicated.port);
+            let mut line = format!("dedicated server on UDP {} ({secure})", dedicated.port);
+            if let (Some(port), Some(hash)) = (dedicated.webtransport, cert) {
+                let hex: String = hash.iter().map(|b| format!("{b:02x}")).collect();
+                ready.push_str(&format!(" wt={port} cert={hex}"));
+                line.push_str(&format!(", browsers on UDP {port} (WebTransport)"));
+            }
+            print.write(Print(line));
+            announce(&ready);
         }
         Err(e) => {
             print.write(Print::error(format!("could not host: {e}")));
@@ -279,7 +292,7 @@ mod tests {
     fn reads_options() {
         let key = "ab".repeat(32);
         let d = Dedicated::from_args(
-            &args("--dedicated --port 27100 --public 127.0.0.1:27100 --idle 5 +mode duel"),
+            &args("--dedicated --port 27100 --public 127.0.0.1:27100 --idle 5 --webtransport 27200 +mode duel"),
             Some(&key),
         )
         .unwrap()
@@ -287,6 +300,7 @@ mod tests {
         assert_eq!(d.port, 27100);
         assert_eq!(d.public, Some("127.0.0.1:27100".parse().unwrap()));
         assert_eq!(d.idle_secs, 5.0);
+        assert_eq!(d.webtransport, Some(27200));
         assert_eq!(d.key, Some([0xab; 32]));
         assert!(!d.owned && !d.protocol_only);
         let d = Dedicated::from_args(&args("--dedicated --owned --protocol"), None)

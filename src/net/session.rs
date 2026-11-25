@@ -97,9 +97,11 @@ pub fn net_commands(
                     key: None,
                     public: None,
                     beacon: true,
+                    // Browsers can't find or trust a LAN game; UDP only.
+                    webtransport: None,
                 };
                 match start_server(&mut commands, &channels, &options) {
-                    Ok(()) => {
+                    Ok(_) => {
                         let lan = lan_ip()
                             .map(|ip| format!("{ip}:{port}"))
                             .unwrap_or_else(|| format!("<this machine>:{port}"));

@@ -7,6 +7,7 @@
 //! | [`launch_lines`] | `+command` arguments | `?c=` in the page's URL |
 //! | [`read_script`] | a file, read at once | fetched from the server, later |
 //! | [`pointer_locked`] | what Bevy says | what the page says |
+//! | [`default_lobby`] | `DEFAULT_LOBBY` | the server the page came from |
 //!
 //! Anything else browser-specific belongs here too, so the rest of the game
 //! stays one code path.
@@ -112,6 +113,11 @@ mod native {
         done(std::fs::read_to_string(path).map_err(|e| e.to_string()));
     }
 
+    /// The lobby a native game uses unless told otherwise: `DEFAULT_LOBBY`.
+    pub fn default_lobby() -> Option<String> {
+        None
+    }
+
     /// Natively Bevy's own cursor state is right.
     pub fn pointer_locked() -> Option<bool> {
         None
@@ -159,6 +165,11 @@ mod web {
                 Err(e) => Err(e),
             });
         });
+    }
+
+    /// A browser uses the lobby that served its page: the page's origin.
+    pub fn default_lobby() -> Option<String> {
+        web_sys::window()?.location().origin().ok()
     }
 
     /// Whether the page holds the mouse. The browser lets go of it on Esc

@@ -22,14 +22,15 @@ use crate::{
     net::{
         protocol_text,
         session::{LocalId, LocalName},
-        transport::start_client_secure,
+        transport::{Route, start_client_secure},
     },
+    platform,
 };
 
 pub(super) fn plugin(app: &mut App) {
     let (send, receive) = mpsc::channel();
     app.insert_resource(Lobby {
-        url: DEFAULT_LOBBY.into(),
+        url: platform::default_lobby().unwrap_or_else(|| DEFAULT_LOBBY.into()),
         send,
         receive: Mutex::new(receive),
         listed: 0,
@@ -70,12 +71,24 @@ struct Listing {
     games: Vec<GameInfo>,
 }
 
-/// A ticket into a game.
+/// A ticket into a game. A browser's also says where the game takes
+/// WebTransport and its certificate's hash.
 #[derive(Deserialize)]
 struct Ticket {
     name: String,
     token: String,
+    #[serde(default)]
+    wt_addr: Option<String>,
+    #[serde(default)]
+    cert_hash: Option<String>,
 }
+
+/// How this build connects: UDP natively, WebTransport in a browser.
+const TRANSPORT: &str = if cfg!(target_arch = "wasm32") {
+    "webtransport"
+} else {
+    "udp"
+};
 
 #[derive(Deserialize)]
 struct Refusal {
@@ -88,12 +101,14 @@ struct CreateBody<'a> {
     mode: &'a str,
     player: &'a str,
     protocol: &'a str,
+    transport: &'a str,
 }
 
 #[derive(Serialize)]
 struct JoinBody<'a> {
     player: &'a str,
     protocol: &'a str,
+    transport: &'a str,
 }
 
 /// What came back from the lobby.
@@ -187,6 +202,7 @@ fn lobby_commands(
                     mode,
                     player: &name.0,
                     protocol: &protocol,
+                    transport: TRANSPORT,
                 };
                 let Ok(request) = ehttp::Request::post_json(format!("{}/games", lobby.url), &body)
                 else {
@@ -229,6 +245,23 @@ fn find_game<'a>(games: &'a [GameInfo], wanted: &str) -> Result<&'a GameInfo, St
         _ => Err(format!(
             "more than one game starts with '{wanted}'; use its id"
         )),
+    }
+}
+
+/// How to reach the game a ticket is for: WebTransport if the ticket says
+/// where and gives the certificate's hash, else UDP.
+fn route(ticket: &Ticket) -> Result<Route, String> {
+    match (&ticket.wt_addr, &ticket.cert_hash) {
+        (Some(addr), Some(hash)) => {
+            let addr = addr
+                .parse()
+                .map_err(|_| format!("the lobby sent a bad address '{addr}'"))?;
+            let cert_hash = hex_bytes(hash)
+                .and_then(|bytes| <[u8; 32]>::try_from(bytes).ok())
+                .ok_or("the lobby sent a bad certificate hash")?;
+            Ok(Route::WebTransport { addr, cert_hash })
+        }
+        _ => Ok(Route::Udp),
     }
 }
 
@@ -290,6 +323,7 @@ fn answers(
                 let body = JoinBody {
                     player: &name.0,
                     protocol: &protocol,
+                    transport: TRANSPORT,
                 };
                 let url = format!("{}/games/{}/join", lobby.url, game.id);
                 if let Ok(request) = ehttp::Request::post_json(url, &body) {
@@ -304,7 +338,14 @@ fn answers(
                     print.write(Print::error("the lobby sent a broken ticket"));
                     continue;
                 };
-                match start_client_secure(&mut commands, &channels, token) {
+                let route = match route(&ticket) {
+                    Ok(route) => route,
+                    Err(why) => {
+                        print.write(Print::error(why));
+                        continue;
+                    }
+                };
+                match start_client_secure(&mut commands, &channels, token, route) {
                     Ok(id) => {
                         local_id.0 = id;
                         print.write(Print(format!("connecting to '{}'...", ticket.name)));
@@ -347,6 +388,27 @@ mod tests {
         assert_eq!(find_game(&games, "shaun").unwrap().id, 3);
         assert!(find_game(&games, "duel").is_err());
         assert!(find_game(&games, "nope").is_err());
+    }
+
+    #[test]
+    fn routes() {
+        let ticket = |wt: Option<&str>, cert: Option<String>| Ticket {
+            name: "g".into(),
+            token: String::new(),
+            wt_addr: wt.map(String::from),
+            cert_hash: cert,
+        };
+        assert!(matches!(route(&ticket(None, None)), Ok(Route::Udp)));
+        let good = ticket(Some("1.2.3.4:27200"), Some("ab".repeat(32)));
+        match route(&good) {
+            Ok(Route::WebTransport { addr, cert_hash }) => {
+                assert_eq!(addr, "1.2.3.4:27200".parse().unwrap());
+                assert_eq!(cert_hash, [0xab; 32]);
+            }
+            _ => panic!("expected WebTransport"),
+        }
+        assert!(route(&ticket(Some("nope"), Some("ab".repeat(32)))).is_err());
+        assert!(route(&ticket(Some("1.2.3.4:1"), Some("ab".into()))).is_err());
     }
 
     #[test]

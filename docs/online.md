@@ -27,6 +27,17 @@ your game                       the server (one Docker container)
   player who has been there longest takes over.
 - **The lobby also serves the browser version** of the game at `/` (`WEB_ROOT`, see
   [web.md](web.md)), so `https://fps.lastra.us/` is a page you can play in.
+- **Browser players join over WebTransport.** A browser has no UDP, so each game also listens
+  on a second port (its own plus 100: 27200-27207) for WebTransport, which is QUIC, so still
+  UDP underneath. Native players stay on plain UDP, and both kinds of player share one game:
+  one netcode server with two sockets (`src/net/transport.rs`).
+  - WebTransport needs TLS. Each game makes its own self-signed certificate when it starts
+    (good for two weeks; games never live that long) and reports its SHA-256 hash to the
+    lobby. A browser's ticket carries that hash, and the browser trusts the certificate by
+    it (`serverCertificateHashes`), so no certificate authority or proxy is involved.
+  - The ticket also names socket 1 (WebTransport) instead of socket 0 (UDP), and the address
+    to connect to. `create` and `join` ask for `"transport": "webtransport"`; the game does
+    that by itself in a browser.
 - **Versions must match.** The lobby asks the game program which protocol it speaks, and a
   player whose game was built from different code is told to update it, instead of failing to
   connect.
@@ -65,7 +76,7 @@ into one image:
 ```sh
 docker build -t fast-fps-server .
 docker run -e FASTFPS_KEY=$(openssl rand -hex 32) -e PUBLIC_HOST=<address players use> \
-  -p 8080:8080 -p 27100-27107:27100-27107/udp fast-fps-server
+  -p 8080:8080 -p 27100-27107:27100-27107/udp -p 27200-27207:27200-27207/udp fast-fps-server
 ```
 
 | Variable | |
@@ -76,9 +87,12 @@ docker run -e FASTFPS_KEY=$(openssl rand -hex 32) -e PUBLIC_HOST=<address player
 | `LOBBY_ADDR` | Where the lobby listens for HTTP. Default `0.0.0.0:8080`. |
 | `FASTFPS_BIN` | The game program. Default: `fast-fps` next to the lobby. |
 | `GAME_IDLE` | Seconds an empty game lasts. Default: the game's own `IDLE_SECS` (120). |
+| `WT_PORT_OFFSET` | Browser players reach a game on its port plus this, over WebTransport. Default `100` (so `27200-27207`); `off` turns browser play off. |
+| `WEB_ROOT` | The browser version to serve at `/`. Default: `web` next to the lobby. |
 
-Put the lobby behind HTTPS (a reverse proxy such as Coolify's). The game ports are plain UDP
-and must be published directly, not through the proxy, and open in the server's firewall.
+Put the lobby behind HTTPS (a reverse proxy such as Coolify's). The game ports (both ranges)
+are UDP and must be published directly, not through the proxy, and open in the server's
+firewall.
 
 ### How fps.lastra.us is hosted
 
@@ -87,12 +101,12 @@ and must be published directly, not through the proxy, and open in the server's 
   Dockerfile builds the dependencies in a layer of their own, which later builds reuse, so
   only the first build compiles all of Bevy.
 - Coolify (the main instance, project `fast-fps`) runs that image: the lobby on port 8080
-  behind its proxy at `https://fps.lastra.us`, and UDP 27100-27107 published straight to the
-  host. `FASTFPS_KEY` is set there as a secret, and `PUBLIC_HOST` is `fps.lastra.us`.
+  behind its proxy at `https://fps.lastra.us`, and UDP 27100-27107 (native players) and
+  27200-27207 (browser players, WebTransport) published straight to the host. `FASTFPS_KEY` is set there as a secret, and `PUBLIC_HOST` is `fps.lastra.us`.
 - With the `COOLIFY_DEPLOY_URL` and `COOLIFY_TOKEN` repository secrets set, the workflow tells
   Coolify to redeploy after each build, so the server always matches `master`. A player
   whose game is older is told to update it.
-- The UDP range is open in the Linode firewall. The DNS record is not proxied by Cloudflare,
+- Both UDP ranges are open in the Linode firewall. The DNS record is not proxied by Cloudflare,
   since the game ports must reach the host directly.
 
 ### Limits

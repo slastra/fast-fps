@@ -10,12 +10,18 @@ avian3d = { version = "0.8", features = ["serialize", "bevy_diagnostic"] }
 bevy_ahoy = { version = "0.3", default-features = false }
 bevy_enhanced_input = "0.27"
 bevy_replicon = "0.45"
-bevy_replicon_renet2 = { version = "1.0.1", features = ["native_transport"] }
+bevy_replicon_renet2 = "1.0.1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 ehttp = { version = "0.7", features = ["json"] }
 rand = "0.9"
 tracing = { version = "0.1", features = ["max_level_debug", "release_max_level_warn"] }
+
+# Natively: UDP for players, plus a WebTransport socket for browser players on
+# dedicated servers, which runs on tokio (net/transport.rs).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+bevy_replicon_renet2 = { version = "1.0.1", features = ["native_transport", "wt_server_transport"] }
+tokio = { version = "1", features = ["rt-multi-thread"] }
 
 # Only in the browser build (`scripts/web.sh`, docs/web.md). Randomness comes
 # from the browser's crypto API (two getrandom versions are in the tree), and
@@ -24,6 +30,8 @@ tracing = { version = "0.1", features = ["max_level_debug", "release_max_level_w
 getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
 getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
 web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Location", "Storage", "console"] }
+bevy_replicon_renet2 = { version = "1.0.1", features = ["wt_client_transport"] }
+web-time = "1"
 
 [workspace]
 # The lobby (`lobby/`) is its own small program, with no Bevy in it.

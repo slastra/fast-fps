@@ -16,6 +16,10 @@
 #   -s WxH    browser size, and so the screenshot size (default 1280x720)
 #   -c DIR    keep the browser's storage in DIR, shared by every script, to
 #             test that settings survive a reload (default: fresh each time)
+#   -L        serve the page from the online lobby (lobby/) instead, on
+#             127.0.0.1:8098 with game ports 27570-27571 (WebTransport on
+#             27670-27671), so `games`, `create` and `join` work. The lobby's
+#             output, and its games', goes to lobby.log.
 #   -h        this help
 #
 # Passes the same way as harness.sh: the script reached `quit`, the console
@@ -35,14 +39,16 @@ MODE=headless
 TIMEOUT=180
 SIZE=1280x720
 PROFILE=""
-usage() { sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; }
-while getopts "nvt:s:c:h" opt; do
+LOBBY=0
+usage() { sed -n '2,32p' "$0" | sed 's/^# \{0,1\}//'; }
+while getopts "nvt:s:c:Lh" opt; do
     case $opt in
     n) BUILD=0 ;;
     v) MODE=nested ;;
     t) TIMEOUT=$OPTARG ;;
     s) SIZE=$OPTARG ;;
     c) PROFILE=$(realpath -m "$OPTARG") ;;
+    L) LOBBY=1 ;;
     h) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
     esac
@@ -81,9 +87,29 @@ SERVE=$RT/www
 mkdir -p "$SERVE"
 for f in "$ROOT"/dist/web/*; do ln -s "$f" "$SERVE/"; done
 ln -s "$ROOT/tests" "$SERVE/tests"
-PORT=8071
-python3 -m http.server $PORT --bind 127.0.0.1 --directory "$SERVE" >"$RUN_DIR/http.log" 2>&1 &
-PIDS+=($!)
+if [ $LOBBY = 1 ]; then
+    # The lobby serves the page, so the game finds it as its own origin, and
+    # starts native dedicated servers (a dev build) for its games.
+    cargo build -q -p lobby -p fast-fps || { echo "web-harness: build failed" >&2; exit 2; }
+    TARGET=${CARGO_TARGET_DIR:-$ROOT/target}
+    PORT=8098
+    env "LD_LIBRARY_PATH=$TARGET/debug/deps:$TARGET/debug:$(rustc --print target-libdir)" \
+        "FASTFPS_KEY=$(printf '5b%.0s' $(seq 32))" "FASTFPS_BIN=$TARGET/debug/fast-fps" \
+        "WEB_ROOT=$SERVE" "XDG_CONFIG_HOME=$RUN_DIR/lobby-config" \
+        PUBLIC_HOST=127.0.0.1 GAME_PORTS=27570-27571 LOBBY_ADDR=127.0.0.1:$PORT GAME_IDLE=6 \
+        "$TARGET/debug/lobby" </dev/null >"$RUN_DIR/lobby.log" 2>&1 &
+    PIDS+=($!)
+    for _ in $(seq 100); do
+        grep -q '^lobby on ' "$RUN_DIR/lobby.log" 2>/dev/null && break
+        sleep 0.2
+    done
+    grep -q '^lobby on ' "$RUN_DIR/lobby.log" ||
+        { echo "web-harness: the lobby did not start, see $RUN_DIR/lobby.log" >&2; exit 2; }
+else
+    PORT=8071
+    python3 -m http.server $PORT --bind 127.0.0.1 --directory "$SERVE" >"$RUN_DIR/http.log" 2>&1 &
+    PIDS+=($!)
+fi
 
 start_sway() {
     local dir=$1 log=$2
@@ -161,6 +187,18 @@ for script in "$@"; do
         tail -6 "$out/console.txt" | sed 's/^/      /' | tee -a "$REPORT"
     fi
 done
+
+if [ $LOBBY = 1 ]; then
+    lobby_problems=$(sed 's/\x1b\[[0-9;]*m//g' "$RUN_DIR/lobby.log" | grep -E 'panicked at| ERROR ' |
+        grep -v 'Sub app did not exist' | cut -c1-240 | head -5)
+    if [ -n "$lobby_problems" ]; then
+        overall=1
+        say "FAIL  lobby  ($RUN_DIR/lobby.log)"
+        echo "$lobby_problems" | sed 's/^/      /' | tee -a "$REPORT"
+    else
+        say "PASS  lobby"
+    fi
+fi
 
 say "results: $RUN_DIR"
 if [ $overall = 0 ]; then say "RESULT: PASS"; else say "RESULT: FAIL"; fi

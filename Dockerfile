@@ -9,7 +9,7 @@
 FROM rust:1-trixie AS chef
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
+        pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev cmake \
     && rm -rf /var/lib/apt/lists/*
 RUN cargo install cargo-chef --locked
 WORKDIR /src

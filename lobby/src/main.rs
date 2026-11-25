@@ -6,8 +6,13 @@
 //! |---|---|
 //! | `GET /health` | `ok` |
 //! | `GET /games` | `{protocol, games: [{id, name, mode, players, max}]}` |
-//! | `POST /games {name, mode, player, protocol}` | starts a game: `{id, token}` |
-//! | `POST /games/<id>/join {player, protocol}` | `{token}` |
+//! | `POST /games {name, mode, player, protocol, transport}` | starts a game: `{id, token}` |
+//! | `POST /games/<id>/join {player, protocol, transport}` | `{token}` |
+//!
+//! `transport` is `udp` (the native game, the default) or `webtransport` (a
+//! browser). A webtransport ticket also carries `wt_addr` and `cert_hash`:
+//! where the game takes browser players, and the SHA-256 of its self-signed
+//! certificate, which the browser checks instead of a certificate authority.
 //!
 //! `protocol` is the client's Replicon protocol hash. A client built from
 //! different code gets "update your game" instead of a failed connection.
@@ -29,6 +34,7 @@
 //! | `LOBBY_ADDR` | where to listen for HTTP (default `0.0.0.0:8080`) |
 //! | `FASTFPS_BIN` | the game program (default: `fast-fps` beside this one) |
 //! | `GAME_IDLE` | seconds an empty game lasts (default: the game's own) |
+//! | `WT_PORT_OFFSET` | each game also takes browser players over WebTransport on its port plus this (default `100`; `off` to disable) |
 //! | `WEB_ROOT` | the browser version to serve at `/` (default: `web` beside this program) |
 //!
 //! Any other `GET` serves a file from `WEB_ROOT`: the browser version of the
@@ -75,6 +81,8 @@ struct Config {
     ports: Vec<u16>,
     bin: PathBuf,
     idle: Option<String>,
+    /// Games take browser players on their port plus this, if set.
+    wt_offset: Option<u16>,
     /// The browser version's files, if there are any.
     web_root: Option<PathBuf>,
     /// From the game program itself: netcode's id and Replicon's hash.
@@ -90,6 +98,8 @@ struct Game {
     players: u32,
     max: u32,
     ready: bool,
+    /// Where it takes browser players, and its certificate's hash (hex).
+    webtransport: Option<(u16, String)>,
     /// Held so the game knows the lobby is alive (see `--owned`).
     _stdin: Option<ChildStdin>,
 }
@@ -154,6 +164,14 @@ fn config() -> Result<Config, String> {
             .unwrap_or_else(|| "fast-fps".into()),
     };
     let idle = std::env::var("GAME_IDLE").ok().filter(|s| !s.is_empty());
+    let wt_offset = match std::env::var("WT_PORT_OFFSET").as_deref() {
+        Ok("off") | Ok("0") => None,
+        Ok(n) => Some(
+            n.parse()
+                .map_err(|_| format!("WT_PORT_OFFSET '{n}' isn't a number"))?,
+        ),
+        Err(_) => Some(100),
+    };
     let web_root = std::env::var_os("WEB_ROOT")
         .map(PathBuf::from)
         .or_else(|| {
@@ -168,6 +186,7 @@ fn config() -> Result<Config, String> {
         ports,
         bin,
         idle,
+        wt_offset,
         web_root,
         netcode_protocol,
         replicon_protocol,
@@ -275,7 +294,9 @@ fn client_id(rng: &mut impl Rng) -> u64 {
     }
 }
 
-fn token(config: &Config, port: u16, admin: bool) -> Result<String, String> {
+/// A ticket for the game listening at `port` on socket `socket` (0 is UDP,
+/// 1 WebTransport; see the game's `net/transport.rs`).
+fn token(config: &Config, port: u16, socket: u8, admin: bool) -> Result<String, String> {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default();
@@ -287,7 +308,7 @@ fn token(config: &Config, port: u16, admin: bool) -> Result<String, String> {
         TOKEN_SECS,
         client_id(&mut rand::rng()),
         TIMEOUT_SECS,
-        0,
+        socket,
         vec![SocketAddr::new(config.public_ip, port)],
         Some(&user_data),
         &config.key,
@@ -301,8 +322,15 @@ fn token(config: &Config, port: u16, admin: bool) -> Result<String, String> {
 /// What a game says on stdout.
 #[derive(Debug, PartialEq)]
 enum Said {
-    Ready { max: u32 },
-    Status { players: u32, mode: String },
+    Ready {
+        max: u32,
+        /// Its WebTransport port and certificate hash, if it has them.
+        webtransport: Option<(u16, String)>,
+    },
+    Status {
+        players: u32,
+        mode: String,
+    },
     Other,
 }
 
@@ -317,6 +345,9 @@ fn parse_said(line: &str) -> Said {
     match rest.split_whitespace().next() {
         Some("ready") => Said::Ready {
             max: field("max").and_then(|m| m.parse().ok()).unwrap_or(16),
+            webtransport: field("wt")
+                .and_then(|p| p.parse().ok())
+                .zip(field("cert").map(str::to_string)),
         },
         Some("status") => Said::Status {
             players: field("players").and_then(|p| p.parse().ok()).unwrap_or(0),
@@ -338,6 +369,9 @@ fn start_game(shared: &Shared, id: u32, port: u16, mode: &str) -> Result<(), Str
         ]);
     if let Some(idle) = &config.idle {
         command.args(["--idle", idle]);
+    }
+    if let Some(offset) = config.wt_offset {
+        command.args(["--webtransport", &(port + offset).to_string()]);
     }
     if mode == "duel" {
         command.args(["+mode", "duel"]);
@@ -362,9 +396,10 @@ fn start_game(shared: &Shared, id: u32, port: u16, mode: &str) -> Result<(), Str
                 continue;
             };
             match parse_said(&line) {
-                Said::Ready { max } => {
+                Said::Ready { max, webtransport } => {
                     game.ready = true;
                     game.max = max;
+                    game.webtransport = webtransport;
                 }
                 Said::Status { players, mode } => {
                     game.players = players;
@@ -390,12 +425,43 @@ struct CreateBody {
     player: String,
     #[serde(default)]
     protocol: String,
+    #[serde(default)]
+    transport: String,
 }
 
 #[derive(Deserialize)]
 struct JoinBody {
     #[serde(default)]
     protocol: String,
+    #[serde(default)]
+    transport: String,
+}
+
+/// The answer to `create` or `join`: a ticket into game `id`, for the
+/// native game (UDP) or a browser (WebTransport).
+fn ticket(config: &Config, id: u32, game: &Game, transport: &str, admin: bool) -> (u16, Value) {
+    let made = match transport {
+        "" | "udp" => token(config, game.port, 0, admin).map(|t| json!({"token": t})),
+        "webtransport" => match &game.webtransport {
+            None => return error(409, "this server doesn't take browser players"),
+            Some((port, cert)) => token(config, *port, 1, admin).map(|t| {
+                json!({
+                    "token": t,
+                    "wt_addr": SocketAddr::new(config.public_ip, *port).to_string(),
+                    "cert_hash": cert,
+                })
+            }),
+        },
+        _ => return error(400, "transport must be udp or webtransport"),
+    };
+    match made {
+        Ok(mut reply) => {
+            reply["id"] = json!(id);
+            reply["name"] = json!(game.name);
+            (200, reply)
+        }
+        Err(e) => error(500, &e),
+    }
 }
 
 fn handle(mut request: Request, shared: &Shared) {
@@ -600,6 +666,7 @@ fn route(request: &mut Request, shared: &Shared) -> (u16, Value) {
                         players: 0,
                         max: 0,
                         ready: false,
+                        webtransport: None,
                         _stdin: None,
                     },
                 );
@@ -624,9 +691,10 @@ fn route(request: &mut Request, shared: &Shared) -> (u16, Value) {
                 }
                 thread::sleep(Duration::from_millis(50));
             }
-            match token(config, port, true) {
-                Ok(token) => (200, json!({"id": id, "name": name, "token": token})),
-                Err(e) => error(500, &e),
+            let lobby = lobby.lock().unwrap();
+            match lobby.games.get(&id) {
+                Some(game) => ticket(config, id, game, &body.transport, true),
+                None => error(500, "the game failed to start"),
             }
         }
         (Method::Post, ["games", id, "join"]) => {
@@ -640,19 +708,11 @@ fn route(request: &mut Request, shared: &Shared) -> (u16, Value) {
             let Ok(id) = id.parse::<u32>() else {
                 return error(404, "no such game");
             };
-            let (port, name) = {
-                let lobby = lobby.lock().unwrap();
-                match lobby.games.get(&id) {
-                    Some(g) if g.ready && g.players >= g.max => {
-                        return error(409, "that game is full");
-                    }
-                    Some(g) if g.ready => (g.port, g.name.clone()),
-                    _ => return error(404, "no such game"),
-                }
-            };
-            match token(config, port, false) {
-                Ok(token) => (200, json!({"id": id, "name": name, "token": token})),
-                Err(e) => error(500, &e),
+            let lobby = lobby.lock().unwrap();
+            match lobby.games.get(&id) {
+                Some(g) if g.ready && g.players >= g.max => error(409, "that game is full"),
+                Some(g) if g.ready => ticket(config, id, g, &body.transport, false),
+                _ => error(404, "no such game"),
             }
         }
         _ => error(404, "not found"),
@@ -670,6 +730,7 @@ mod tests {
             ports: vec![27100, 27101],
             bin: "fast-fps".into(),
             idle: None,
+            wt_offset: Some(100),
             web_root: None,
             netcode_protocol: 42,
             replicon_protocol: "123".into(),
@@ -684,6 +745,7 @@ mod tests {
             players: 0,
             max: 16,
             ready: true,
+            webtransport: None,
             _stdin: None,
         }
     }
@@ -742,7 +804,17 @@ mod tests {
     fn what_games_say() {
         assert_eq!(
             parse_said("@fastfps ready port=27100 max=16"),
-            Said::Ready { max: 16 }
+            Said::Ready {
+                max: 16,
+                webtransport: None
+            }
+        );
+        assert_eq!(
+            parse_said("@fastfps ready port=27100 max=16 wt=27200 cert=ab12"),
+            Said::Ready {
+                max: 16,
+                webtransport: Some((27200, "ab12".into()))
+            }
         );
         assert_eq!(
             parse_said("@fastfps status players=2 mode=duel"),
@@ -762,7 +834,7 @@ mod tests {
     #[test]
     fn tokens_read_back() {
         let config = config();
-        let hex = token(&config, 27101, true).unwrap();
+        let hex = token(&config, 27101, 0, true).unwrap();
         let bytes: Vec<u8> = (0..hex.len())
             .step_by(2)
             .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
@@ -799,6 +871,35 @@ mod tests {
             web_path(root, "//etc/passwd"),
             Some(root.join("etc/passwd"))
         );
+    }
+
+    #[test]
+    fn browser_tickets() {
+        let config = config();
+        let mut g = game(27101);
+        // A game without WebTransport turns browsers away.
+        assert_eq!(ticket(&config, 1, &g, "webtransport", false).0, 409);
+        assert_eq!(ticket(&config, 1, &g, "carrier pigeon", false).0, 400);
+        g.webtransport = Some((27201, "ab".repeat(32)));
+        let (code, reply) = ticket(&config, 1, &g, "webtransport", false);
+        assert_eq!(code, 200);
+        assert_eq!(reply["wt_addr"], "127.0.0.1:27201");
+        assert_eq!(reply["cert_hash"], "ab".repeat(32));
+        let hex = reply["token"].as_str().unwrap();
+        let bytes: Vec<u8> = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap())
+            .collect();
+        let token = ConnectToken::read(&mut bytes.as_slice()).unwrap();
+        // Socket 1 is the game's WebTransport socket.
+        assert_eq!(token.socket_id, 1);
+        assert_eq!(
+            token.server_addresses[0],
+            Some("127.0.0.1:27201".parse().unwrap())
+        );
+        // The native game's ticket is still for UDP, socket 0.
+        let (_, reply) = ticket(&config, 1, &g, "", false);
+        assert!(reply.get("cert_hash").is_none());
     }
 
     #[test]
