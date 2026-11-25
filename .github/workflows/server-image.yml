@@ -41,4 +41,5 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Redeploy on Coolify
         if: env.COOLIFY_DEPLOY_URL != ''
-        run: curl -fsS -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_DEPLOY_URL"
+        run: |
+          curl -fsS -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_DEPLOY_URL"
