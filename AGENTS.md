@@ -52,6 +52,7 @@ scripts/new-game.sh ~/Projects/Rust/my-game   # start a new game from this one
 | Console commands for testing | `src/debug/` |
 | The headless server (`--dedicated`) | `src/dedicated.rs`, `src/main.rs` |
 | Online play: the lobby and its commands | `lobby/`, `src/net/lobby.rs`, `docs/online.md` |
+| The browser version, and anything that differs there | `src/platform.rs`, `web/`, `docs/web.md` |
 
 ## Rules of this codebase
 
@@ -64,6 +65,11 @@ scripts/new-game.sh ~/Projects/Rust/my-game   # start a new game from this one
   sound. Anything server-side that reads those must cope with them being absent. Visual-only
   plugins are left out of the dedicated app in `src/main.rs` (and `world::plugin` skips its
   lamps and dummy dressing there).
+- **The game also runs in a browser** (`scripts/web.sh`, `docs/web.md`). Anything that differs
+  there goes in `src/platform.rs` with a native and a web side, so the rest stays one code
+  path. CI lints the wasm build; check it yourself with
+  `RUSTFLAGS='--cfg getrandom_backend="wasm_js"' cargo clippy -p fast-fps --target
+  wasm32-unknown-unknown --no-default-features --features web`.
 - **Everything on the wire lives in `src/net/protocol.rs`** and is registered in its
   `register` function. Client and server must register the same things in the same order.
 - **Console commands are the interface.** Register one with `app.console_command(name, usage,
@@ -120,6 +126,11 @@ Each of these cost real debugging time once.
 - **A dev build can't be run directly.** It links Bevy as a shared library, so
   `target/debug/fast-fps` fails with "cannot open shared object file". Use `cargo run --`, or
   set `LD_LIBRARY_PATH` as `scripts/harness.sh` does. Release builds don't have this problem.
+- **In a browser, `std::time::Instant::now()` panics, and files, threads and UDP sockets don't
+  exist.** Use `bevy::platform::time::Instant`; put anything else in `src/platform.rs`. It
+  compiles fine natively, so only the wasm check or a browser run catches it.
+- **A browser lets go of the mouse on Esc without telling the game,** and Ctrl+W closes the
+  tab. `player/input.rs` handles both (it asks the page, and crouch is C there).
 - **Two instances can't share a UDP port.** The LAN scenario uses 27555 so it can run beside a
   real game on the default 27015.
 
@@ -161,6 +172,8 @@ more. That is the engine compiling, once. Until it finishes there is nothing to 
 - Two physical machines on a real network (the LAN scenario runs both sides on localhost).
 - Online play over the internet: latency, packet loss, players' home routers. The online
   scenario runs the lobby, its games and both players on localhost.
-- Frame rate on other hardware.
+- Frame rate on other hardware, and in browsers other than Chrome.
+- How the browser version feels and sounds. `scripts/web-harness.sh` runs scripts in Chrome,
+  but nobody is holding the mouse.
 
 Say so when a change touches one of these, instead of reporting it verified.

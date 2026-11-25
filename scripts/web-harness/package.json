@@ -1,0 +1,9 @@
+{
+  "name": "fast-fps-web-harness",
+  "private": true,
+  "description": "Runs the game's console scripts in a real browser (scripts/web-harness.sh)",
+  "type": "module",
+  "dependencies": {
+    "playwright-core": "1.65.1"
+  }
+}

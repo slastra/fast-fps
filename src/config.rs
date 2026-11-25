@@ -23,12 +23,14 @@ pub const MAX_CLIENTS: usize = 16;
 pub const PROTOCOL_ID: u64 = fnv1a(GAME_NAME);
 /// Seconds a lobby's connect token stays valid. A game server also refuses
 /// tokens older than this.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // no tokens in a browser yet
 pub const CONNECT_TOKEN_SECS: u16 = 30;
 /// The online lobby that lists games and starts new ones (`lobby/`).
 /// Players can point at another with the `lobby` command.
 pub const DEFAULT_LOBBY: &str = "https://fps.lastra.us";
 /// How many times a second a dedicated server (`--dedicated`) runs its game
 /// loop. A listen server runs at its frame rate instead.
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))] // no server in a browser
 pub const DEDICATED_TICK_HZ: f64 = 60.0;
 /// A dedicated server with no players for this many seconds shuts down.
 pub const IDLE_SECS: f32 = 120.0;

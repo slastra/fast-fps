@@ -29,12 +29,16 @@
 //! | `LOBBY_ADDR` | where to listen for HTTP (default `0.0.0.0:8080`) |
 //! | `FASTFPS_BIN` | the game program (default: `fast-fps` beside this one) |
 //! | `GAME_IDLE` | seconds an empty game lasts (default: the game's own) |
+//! | `WEB_ROOT` | the browser version to serve at `/` (default: `web` beside this program) |
+//!
+//! Any other `GET` serves a file from `WEB_ROOT`: the browser version of the
+//! game (`scripts/web.sh`), with `/` as its `index.html`.
 
 use std::{
     collections::{BTreeMap, HashMap},
     io::{BufRead, BufReader, Read},
     net::{IpAddr, SocketAddr, ToSocketAddrs},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{ChildStdin, Command, Stdio},
     sync::{Arc, Mutex},
     thread,
@@ -71,6 +75,8 @@ struct Config {
     ports: Vec<u16>,
     bin: PathBuf,
     idle: Option<String>,
+    /// The browser version's files, if there are any.
+    web_root: Option<PathBuf>,
     /// From the game program itself: netcode's id and Replicon's hash.
     netcode_protocol: u64,
     replicon_protocol: String,
@@ -148,6 +154,13 @@ fn config() -> Result<Config, String> {
             .unwrap_or_else(|| "fast-fps".into()),
     };
     let idle = std::env::var("GAME_IDLE").ok().filter(|s| !s.is_empty());
+    let web_root = std::env::var_os("WEB_ROOT")
+        .map(PathBuf::from)
+        .or_else(|| {
+            let exe = std::env::current_exe().ok()?;
+            Some(exe.parent()?.join("web"))
+        })
+        .filter(|dir| dir.join("index.html").is_file());
     let (netcode_protocol, replicon_protocol) = ask_protocol(&bin)?;
     Ok(Config {
         key,
@@ -155,6 +168,7 @@ fn config() -> Result<Config, String> {
         ports,
         bin,
         idle,
+        web_root,
         netcode_protocol,
         replicon_protocol,
     })
@@ -385,12 +399,113 @@ struct JoinBody {
 }
 
 fn handle(mut request: Request, shared: &Shared) {
+    if let Some(response) = static_file(&request, &shared.0) {
+        let _ = request.respond(response);
+        return;
+    }
     let (code, body) = route(&mut request, shared);
     let header = Header::from_bytes("Content-Type", "application/json").expect("valid header");
     let response = Response::from_string(body.to_string())
         .with_status_code(code)
         .with_header(header);
     let _ = request.respond(response);
+}
+
+/// The file in `root` a URL path names, if it is a plain path inside it:
+/// `/` is `index.html`, and nothing may climb out with `..` or reach a
+/// hidden file.
+fn web_path(root: &Path, url_path: &str) -> Option<PathBuf> {
+    let path = url_path.split('?').next()?.trim_start_matches('/');
+    let path = if path.is_empty() { "index.html" } else { path };
+    let mut file = root.to_path_buf();
+    for part in path.split('/') {
+        if part.is_empty() || part.starts_with('.') || part.contains('\\') {
+            return None;
+        }
+        file.push(part);
+    }
+    Some(file)
+}
+
+fn content_type(file: &Path) -> &'static str {
+    match file.extension().and_then(|e| e.to_str()) {
+        Some("html") => "text/html; charset=utf-8",
+        Some("js") => "text/javascript",
+        Some("wasm") => "application/wasm",
+        Some("json") => "application/json",
+        Some("css") => "text/css",
+        Some("png") => "image/png",
+        _ => "text/plain; charset=utf-8",
+    }
+}
+
+/// Serve a file of the browser version, for any `GET` that isn't the API.
+/// A gzipped copy (`name.gz`, made by `scripts/web.sh`) goes to browsers
+/// that take gzip. Files are revalidated each visit with an ETag, so a new
+/// build is picked up at once and an unchanged one isn't downloaded again.
+fn static_file(request: &Request, config: &Config) -> Option<Response<std::fs::File>> {
+    if *request.method() != Method::Get {
+        return None;
+    }
+    let first = request
+        .url()
+        .trim_start_matches('/')
+        .split(['/', '?'])
+        .next()?;
+    if matches!(first, "games" | "health") {
+        return None;
+    }
+    let file = web_path(config.web_root.as_ref()?, request.url())?;
+    let header = |name: &str, value: &str| Header::from_bytes(name, value).ok();
+    let accepts_gzip = request
+        .headers()
+        .iter()
+        .any(|h| h.field.equiv("Accept-Encoding") && h.value.as_str().contains("gzip"));
+    let gz = PathBuf::from(format!("{}.gz", file.display()));
+    let (path, gzipped) = if accepts_gzip && gz.is_file() {
+        (gz, true)
+    } else if file.is_file() {
+        (file.clone(), false)
+    } else {
+        return None;
+    };
+    let meta = std::fs::metadata(&path).ok()?;
+    let modified = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs());
+    let etag = format!(
+        "\"{:x}-{modified:x}{}\"",
+        meta.len(),
+        if gzipped { "-gz" } else { "" }
+    );
+    let mut headers = vec![
+        header("Content-Type", content_type(&file)),
+        header("Cache-Control", "no-cache"),
+        header("ETag", &etag),
+        header("Vary", "Accept-Encoding"),
+    ];
+    let unchanged = request
+        .headers()
+        .iter()
+        .any(|h| h.field.equiv("If-None-Match") && h.value.as_str() == etag);
+    if unchanged {
+        let empty = std::fs::File::open(&path).ok()?;
+        let mut response = Response::new(304.into(), Vec::new(), empty, Some(0), None);
+        for h in headers.into_iter().flatten() {
+            response.add_header(h);
+        }
+        return Some(response);
+    }
+    if gzipped {
+        headers.push(header("Content-Encoding", "gzip"));
+    }
+    let mut response = Response::from_file(std::fs::File::open(&path).ok()?);
+    for h in headers.into_iter().flatten() {
+        response.add_header(h);
+    }
+    Some(response)
 }
 
 fn error(code: u16, text: &str) -> (u16, Value) {
@@ -555,6 +670,7 @@ mod tests {
             ports: vec![27100, 27101],
             bin: "fast-fps".into(),
             idle: None,
+            web_root: None,
             netcode_protocol: 42,
             replicon_protocol: "123".into(),
         }
@@ -661,6 +777,28 @@ mod tests {
         // The admin flag is in the encrypted part, for the server's eyes
         // only; the online harness scenario checks it arrives.
         assert_ne!(token.client_id, 0);
+    }
+
+    #[test]
+    fn web_paths_stay_inside() {
+        let root = Path::new("/app/web");
+        assert_eq!(web_path(root, "/"), Some(root.join("index.html")));
+        assert_eq!(
+            web_path(root, "/?c=exec%20x"),
+            Some(root.join("index.html"))
+        );
+        assert_eq!(
+            web_path(root, "/cfg/bots.cfg"),
+            Some(root.join("cfg/bots.cfg"))
+        );
+        assert_eq!(web_path(root, "/../etc/passwd"), None);
+        assert_eq!(web_path(root, "/cfg/../../x"), None);
+        assert_eq!(web_path(root, "/.git/config"), None);
+        // A doubled slash is trimmed: still inside the root.
+        assert_eq!(
+            web_path(root, "//etc/passwd"),
+            Some(root.join("etc/passwd"))
+        );
     }
 
     #[test]

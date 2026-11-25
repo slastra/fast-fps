@@ -12,8 +12,9 @@ Every source file starts with a comment saying what it is for. This page is the 
   it is. That trusts clients, which is fine among friends on a LAN.
 - **Looks are generated.** The map, the sky, the guns and their icons and the bodies are all
   built from code at startup. The sounds are recordings made with an AI model
-  (`scripts/sounds.py`), embedded in the binary from `assets/sounds/`. The only file loaded at
-  run time is the HUD font.
+  (`scripts/sounds.py`), embedded in the binary from `assets/sounds/`, as is the HUD font.
+  Nothing is loaded from files at run time, which is also what lets the game run in a
+  browser.
 
 ## Folders
 
@@ -22,6 +23,8 @@ src/
   main.rs        Assembles the app from the plugins below: the game, or with
                  --dedicated, a headless server. Nothing else.
   dedicated.rs   The headless server: options, stdin console, status lines.
+  platform.rs    What differs in the browser version: settings, launch lines,
+                 reading scripts, mouse capture.
   config.rs      The game's name and the numbers you are most likely to tune.
   physics.rs     Collision layers: who can touch whom.
   render.rs      The camera and its post-processing: bloom, shadows, anti-aliasing.
@@ -40,6 +43,7 @@ src/
     session.rs     host / connect / disconnect / status / name.
     discovery.rs   Finding games on the LAN.
     lobby.rs       lobby / games / create / join: playing online.
+    transport.rs   Opening connections: UDP natively, not yet in a browser.
     admin.rs       Sending host-only commands to the server you're on.
 
   server/        The rules. Runs when hosting or offline, never on a client.
@@ -92,13 +96,17 @@ src/
                  (state / assert / wait_until).
 
 lobby/           The online lobby: a small program of its own, no Bevy. Lists games,
-                 starts a dedicated server for each, hands out connect tokens.
+                 starts a dedicated server for each, hands out connect tokens, and
+                 serves the browser version.
+web/             The page the browser version runs in (index.html).
 Dockerfile       The lobby and the headless game in one image, for hosting.
 
 scripts/
   harness.sh     Run console scripts against the game; PASS or FAIL.
   check.sh       Format, lint, unit tests and every scenario.
   new-game.sh    Start a new game from this project.
+  web.sh         Build the browser version into dist/web.
+  web-harness.sh Run console scripts in the browser version, in Chrome.
 tests/harness/   The scripted scenarios, and suite.txt listing what check.sh runs.
 cfg/             Console scripts for players (cfg/bots.cfg).
 assets/          The HUD font and its license.

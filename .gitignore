@@ -4,3 +4,6 @@
 .cargo/config.toml
 # Standalone copies made by scripts/package.sh
 /dist
+
+# The web harness's node_modules (scripts/web-harness/)
+node_modules

@@ -55,7 +55,7 @@ pub(super) fn plugin(app: &mut App) {
             Ok(file) => {
                 app.insert_resource(PerfLog {
                     file,
-                    started: std::time::Instant::now(),
+                    started: bevy::platform::time::Instant::now(),
                     second: FrameWindow::default(),
                     since: 0.0,
                 });
@@ -88,10 +88,10 @@ pub(super) fn plugin(app: &mut App) {
 
 /// When this frame's update began.
 #[derive(Resource, Default)]
-struct UpdateStart(Option<std::time::Instant>);
+struct UpdateStart(Option<bevy::platform::time::Instant>);
 
 fn start_update(mut start: ResMut<UpdateStart>) {
-    start.0 = Some(std::time::Instant::now());
+    start.0 = Some(bevy::platform::time::Instant::now());
 }
 
 /// Frame times (ms) since the last `perf_reset`.
@@ -109,13 +109,13 @@ struct FrameWindow {
 /// effect switched off) keeps its last value in the store forever, so only
 /// measurements newer than the last one counted are new data.
 #[derive(Resource, Default)]
-struct Seen(std::collections::HashMap<String, std::time::Instant>);
+struct Seen(std::collections::HashMap<String, bevy::platform::time::Instant>);
 
 /// The `PERF_LOG` file and the second being measured for it.
 #[derive(Resource)]
 struct PerfLog {
     file: std::fs::File,
-    started: std::time::Instant,
+    started: bevy::platform::time::Instant,
     second: FrameWindow,
     /// Seconds of real time in `second` so far.
     since: f32,

@@ -101,6 +101,10 @@ Whoever creates a game runs it: `mode`, `bot` and the other host commands work f
 they were hosting. An empty game shuts itself down after two minutes. `lobby <url>` points the
 game at a different lobby; [docs/online.md](docs/online.md) explains how to run one.
 
+You can also play in a browser with WebGPU (a recent Chrome or Edge) at
+[fps.lastra.us](https://fps.lastra.us/), against bots for now. Crouch is C there, since Ctrl+W
+closes the tab. [docs/web.md](docs/web.md) has the details.
+
 Launch arguments are console commands too: `cargo run -- +name alice +host`.
 [docs/console.md](docs/console.md) lists every command.
 

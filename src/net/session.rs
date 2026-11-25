@@ -1,28 +1,22 @@
 //! Starting and ending a session: the `host`, `connect`, `disconnect`,
 //! `status` and `name` commands, and swapping worlds when the role changes.
 
-use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket},
-    time::{Duration, SystemTime},
-};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs, UdpSocket};
 
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 use bevy_replicon_renet2::{
-    RenetChannelsExt,
-    netcode::{
-        ClientAuthentication, ConnectToken, NativeSocket, NetcodeClientTransport,
-        NetcodeServerTransport, ServerAuthentication, ServerSetupConfig,
-    },
-    renet2::{ConnectionConfig, RenetClient, RenetServer},
+    netcode::{NetcodeClientTransport, NetcodeServerTransport},
+    renet2::{RenetClient, RenetServer},
 };
 
 use crate::{
-    config::{CONNECT_TOKEN_SECS, DEFAULT_PORT, MAX_CLIENTS, PROTOCOL_ID},
+    config::DEFAULT_PORT,
     console::{Console, ConsoleAppExt, ConsoleCommand, Print, SaveSetting},
     net::{
         discovery::{Beacon, Discovery},
         protocol::{Feed, Health, Player, PlayerName, Score, SetName},
+        transport::{HostOptions, start_client, start_server},
     },
 };
 
@@ -62,16 +56,6 @@ impl Default for LocalName {
             .unwrap_or_else(|| "player".into());
         Self(name)
     }
-}
-
-fn connection_config(channels: &RepliconChannels) -> ConnectionConfig {
-    ConnectionConfig::from_channels(channels.server_configs(), channels.client_configs())
-}
-
-fn now() -> Duration {
-    SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
 }
 
 pub fn net_commands(
@@ -224,95 +208,6 @@ pub fn net_commands(
     if let Some(line) = discovery.pending_connect.take() {
         console.exec(line);
     }
-}
-
-/// How to host: `host` on a LAN, or a dedicated server (`dedicated.rs`).
-pub struct HostOptions {
-    pub port: u16,
-    /// With a key, only clients holding a connect token signed with it can
-    /// join (see `lobby/`). Without one, anyone can.
-    pub key: Option<[u8; 32]>,
-    /// The address clients use, if not the socket's own. Connect tokens name
-    /// it, and the server checks they do.
-    pub public: Option<SocketAddr>,
-    /// Announce the game on the LAN.
-    pub beacon: bool,
-}
-
-pub fn start_server(
-    commands: &mut Commands,
-    channels: &RepliconChannels,
-    options: &HostOptions,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, options.port))?;
-    let address = options.public.unwrap_or(socket.local_addr()?);
-    let authentication = match options.key {
-        Some(private_key) => ServerAuthentication::Secure { private_key },
-        None => ServerAuthentication::Unsecure,
-    };
-    let config = ServerSetupConfig {
-        current_time: now(),
-        max_token_lifetime: CONNECT_TOKEN_SECS,
-        max_clients: MAX_CLIENTS,
-        protocol_id: PROTOCOL_ID,
-        authentication,
-        socket_addresses: vec![vec![address]],
-    };
-    let transport = NetcodeServerTransport::new(config, NativeSocket::new(socket)?)?;
-    commands.insert_resource(RenetServer::new(connection_config(channels)));
-    commands.insert_resource(transport);
-
-    if !options.beacon {
-        return Ok(());
-    }
-    let port = options.port;
-    let beacon = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-    beacon.set_broadcast(true)?;
-    commands.insert_resource(Beacon {
-        socket: beacon,
-        port,
-        timer: Timer::from_seconds(1.0, TimerMode::Repeating),
-    });
-    Ok(())
-}
-
-fn start_client(
-    commands: &mut Commands,
-    channels: &RepliconChannels,
-    server_addr: SocketAddr,
-) -> Result<u64, Box<dyn std::error::Error>> {
-    let client_id = rand::random::<u64>().max(1);
-    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-    let authentication = ClientAuthentication::Unsecure {
-        client_id,
-        protocol_id: PROTOCOL_ID,
-        socket_id: 0,
-        server_addr,
-        user_data: None,
-    };
-    let transport = NetcodeClientTransport::new(now(), authentication, NativeSocket::new(socket)?)?;
-    // UDP is unreliable, so renet does its own resends.
-    commands.insert_resource(RenetClient::new(connection_config(channels), false));
-    commands.insert_resource(transport);
-    Ok(client_id)
-}
-
-/// Join a server with a connect token from the lobby (`net/lobby.rs`).
-/// Returns the player id the token was made for.
-pub fn start_client_secure(
-    commands: &mut Commands,
-    channels: &RepliconChannels,
-    token: ConnectToken,
-) -> Result<u64, Box<dyn std::error::Error>> {
-    let client_id = token.client_id;
-    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
-    let authentication = ClientAuthentication::Secure {
-        connect_token: token,
-    };
-    let transport = NetcodeClientTransport::new(now(), authentication, NativeSocket::new(socket)?)?;
-    commands.insert_resource(RenetClient::new(connection_config(channels), false));
-    commands.insert_resource(transport);
-    Ok(client_id)
 }
 
 fn resolve(target: &str) -> Result<SocketAddr, String> {

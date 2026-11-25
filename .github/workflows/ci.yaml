@@ -37,7 +37,31 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy
-        run: cargo clippy --locked --all-targets --profile ci -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --profile ci -- -D warnings
 
       - name: Run unit tests
-        run: cargo test --locked --profile ci
+        run: cargo test --locked --workspace --profile ci
+
+  web:
+    # The browser version (docs/web.md) must keep compiling: no std::fs,
+    # threads, sockets or std::time::Instant outside src/platform.rs.
+    name: Browser build compiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      RUSTFLAGS: '--cfg getrandom_backend="wasm_js"'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: clippy
+
+      - name: Restore Rust cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Clippy for the browser
+        run: cargo clippy --locked -p fast-fps --target wasm32-unknown-unknown --no-default-features --features web --profile ci -- -D warnings

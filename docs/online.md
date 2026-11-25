@@ -25,6 +25,8 @@ your game                       the server (one Docker container)
   as if they were hosting: their game sends the command to the server, which runs it and
   sends back what it printed (`src/net/admin.rs`, `src/server/admin.rs`). If they leave, the
   player who has been there longest takes over.
+- **The lobby also serves the browser version** of the game at `/` (`WEB_ROOT`, see
+  [web.md](web.md)), so `https://fps.lastra.us/` is a page you can play in.
 - **Versions must match.** The lobby asks the game program which protocol it speaks, and a
   player whose game was built from different code is told to update it, instead of failing to
   connect.

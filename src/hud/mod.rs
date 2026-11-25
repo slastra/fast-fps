@@ -14,13 +14,11 @@ mod crosshair;
 mod feed;
 mod panels;
 
-use bevy::{
-    asset::LoadState, diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, text::FontWeight,
-};
+use bevy::{diagnostic::FrameTimeDiagnosticsPlugin, prelude::*, text::FontWeight};
 use bevy_replicon::prelude::*;
 
 use crate::{
-    console::{ConsoleAppExt, Print, ScriptHold},
+    console::ConsoleAppExt,
     weapon::{ICON_ASPECT, WeaponIcons, WeaponKind},
 };
 
@@ -73,7 +71,6 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             Update,
             (
-                font_loaded,
                 scale_with_window,
                 crosshair::crosshair,
                 crosshair::reload_bar,
@@ -96,32 +93,11 @@ pub(super) fn plugin(app: &mut App) {
     );
 }
 
-fn load_font(mut commands: Commands, assets: Res<AssetServer>, mut hold: ResMut<ScriptHold>) {
-    // Scripts wait for the font, so screenshots never show the fallback.
-    hold.0 += 1;
-    commands.insert_resource(HudFont(assets.load("fonts/MartianGrotesk-VF.ttf")));
-}
-
-fn font_loaded(
-    font: Res<HudFont>,
-    assets: Res<AssetServer>,
-    mut hold: ResMut<ScriptHold>,
-    mut print: MessageWriter<Print>,
-    mut done: Local<bool>,
-) {
-    if *done {
-        return;
-    }
-    let failed = matches!(assets.load_state(font.0.id()), LoadState::Failed(_));
-    if failed {
-        print.write(Print::error(
-            "could not load assets/fonts/MartianGrotesk-VF.ttf",
-        ));
-    }
-    if failed || assets.is_loaded_with_dependencies(font.0.id()) {
-        *done = true;
-        hold.0 = hold.0.saturating_sub(1);
-    }
+fn load_font(mut commands: Commands, mut fonts: ResMut<Assets<Font>>) {
+    // Built into the program, like the sounds, so nothing is read from disk
+    // or fetched at run time (which matters in a browser).
+    let bytes = include_bytes!("../../assets/fonts/MartianGrotesk-VF.ttf");
+    commands.insert_resource(HudFont(fonts.add(Font::from_bytes(bytes.to_vec()))));
 }
 
 fn scale_with_window(window: Single<&Window>, mut scale: ResMut<UiScale>) {

@@ -21,7 +21,8 @@ use crate::{
     debug::probe::Probe,
     net::{
         protocol_text,
-        session::{LocalId, LocalName, start_client_secure},
+        session::{LocalId, LocalName},
+        transport::start_client_secure,
     },
 };
 

@@ -11,19 +11,20 @@
 //! - Work that finishes later, like saving a screenshot, takes a
 //!   [`ScriptHold`] and the script pauses until it is released.
 
+use std::sync::{Mutex, mpsc};
+
 use bevy::prelude::*;
 
 use crate::{
     config::GAME_NAME,
-    console::{
-        CommandRegistry, Console, ConsoleCommand, Print,
-        settings::{Settings, config_path},
-    },
+    console::{CommandRegistry, Console, ConsoleCommand, Print, settings::Settings},
     dedicated::Dedicated,
+    platform,
 };
 
-/// Runs `config.cfg`, then the launch arguments:
-/// `+name alice +host 27015` runs `name alice` then `host 27015`.
+/// Runs the saved settings, then the launch arguments: `+name alice +host
+/// 27015` runs `name alice` then `host 27015`. In a browser the launch
+/// arguments come from the page's URL instead (`?c=name alice&c=host`).
 pub fn queue_launch_commands(
     mut console: ResMut<Console>,
     mut settings: ResMut<Settings>,
@@ -36,9 +37,7 @@ pub fn queue_launch_commands(
         )));
     }
     // A player's saved settings are for a player's game, not a server.
-    let saved = config_path()
-        .filter(|_| dedicated.is_none())
-        .and_then(|p| std::fs::read_to_string(p).ok());
+    let saved = platform::load_settings().filter(|_| dedicated.is_none());
     if let Some(text) = saved {
         for line in text.lines() {
             let line = line.trim();
@@ -51,26 +50,33 @@ pub fn queue_launch_commands(
             console.script.push_back(line.to_string());
         }
     }
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let mut current: Vec<String> = Vec::new();
-    for arg in args {
-        if let Some(name) = arg.strip_prefix('+') {
-            if !current.is_empty() {
-                console.script.push_back(current.join(" "));
-            }
-            current = vec![name.to_string()];
-        } else if !current.is_empty() {
-            current.push(arg);
-        }
+    // A browser starts on medium graphics until the player picks (docs/web.md).
+    if cfg!(target_arch = "wasm32") && !settings.0.contains_key("r_quality") {
+        console.script.push_front("r_quality medium".into());
     }
-    if !current.is_empty() {
-        console.script.push_back(current.join(" "));
-    }
+    console.script.extend(platform::launch_lines());
 }
 
 /// Frames drawn before the first script line runs, so shaders are compiled
 /// and the first screenshot isn't of a half-built scene.
 const WARMUP_FRAMES: u32 = 30;
+
+/// Script files on their way to `exec` (`platform::read_script`).
+#[derive(Resource)]
+pub struct Scripts {
+    send: mpsc::Sender<(String, Result<String, String>)>,
+    receive: Mutex<mpsc::Receiver<(String, Result<String, String>)>>,
+}
+
+impl Default for Scripts {
+    fn default() -> Self {
+        let (send, receive) = mpsc::channel();
+        Self {
+            send,
+            receive: Mutex::new(receive),
+        }
+    }
+}
 
 /// Reasons the script can't continue yet. Add one when you start something
 /// the next line depends on (loading an asset, saving a screenshot) and
@@ -81,7 +87,8 @@ pub struct ScriptHold(pub u32);
 /// Run typed lines at once and the next script line when it is due.
 pub fn run_script(
     time: Res<Time>,
-    hold: Res<ScriptHold>,
+    mut hold: ResMut<ScriptHold>,
+    scripts: Res<Scripts>,
     mut console: ResMut<Console>,
     registry: Res<CommandRegistry>,
     mut commands: MessageWriter<ConsoleCommand>,
@@ -89,6 +96,26 @@ pub fn run_script(
     mut frames: Local<u32>,
 ) {
     let mut lines: Vec<String> = std::mem::take(&mut console.queued);
+
+    // Scripts that `exec` asked for and that have arrived.
+    let arrived: Vec<_> = match scripts.receive.lock() {
+        Ok(receive) => receive.try_iter().collect(),
+        Err(_) => Vec::new(),
+    };
+    for (path, text) in arrived {
+        hold.0 = hold.0.saturating_sub(1);
+        match text {
+            // Run the file before whatever was already scripted.
+            Ok(text) => {
+                for (i, l) in text.lines().enumerate() {
+                    console.script.insert(i, l.to_string());
+                }
+            }
+            Err(e) => {
+                print.write(Print::error(format!("exec {path}: {e}")));
+            }
+        }
+    }
 
     *frames += 1;
     console.wait -= time.delta_secs();
@@ -126,15 +153,15 @@ pub fn run_script(
             let name = name.to_lowercase();
             let args: Vec<String> = words.collect();
             match name.as_str() {
-                "exec" => match args.first().map(std::fs::read_to_string) {
-                    Some(Ok(text)) => {
-                        // Run the file before whatever was already scripted.
-                        for (i, l) in text.lines().enumerate() {
-                            console.script.insert(i, l.to_string());
-                        }
-                    }
-                    Some(Err(e)) => {
-                        print.write(Print::error(format!("exec {}: {e}", args[0])));
+                "exec" => match args.first() {
+                    Some(path) => {
+                        // Natively the file is read at once; in a browser
+                        // it's fetched, and the script waits for it.
+                        hold.0 += 1;
+                        let (send, path) = (scripts.send.clone(), path.clone());
+                        platform::read_script(&path.clone(), move |text| {
+                            let _ = send.send((path, text));
+                        });
                     }
                     None => {
                         print.write(Print::error("usage: exec <file>"));

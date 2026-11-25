@@ -16,6 +16,7 @@ mod hud;
 mod lowpoly;
 mod net;
 mod physics;
+mod platform;
 mod player;
 mod render;
 mod server;
@@ -25,20 +26,23 @@ mod weapon;
 mod world;
 
 use avian3d::prelude::*;
-use std::time::Duration;
-
-use bevy::{
-    app::ScheduleRunnerPlugin,
-    prelude::*,
-    render::{RenderPlugin, settings::WgpuSettings},
-    window::{ExitCondition, PresentMode},
-};
+use bevy::{prelude::*, render::RenderPlugin, window::PresentMode};
 use bevy_ahoy::prelude::*;
 use bevy_enhanced_input::prelude::*;
 use bevy_replicon::prelude::*;
 use bevy_replicon_renet2::RepliconRenetPlugins;
 
 fn main() -> AppExit {
+    // A browser runs the game only; it has no use for a server.
+    #[cfg(target_arch = "wasm32")]
+    return game();
+    #[cfg(not(target_arch = "wasm32"))]
+    native_main()
+}
+
+/// The game, or with `--dedicated`, a headless server.
+#[cfg(not(target_arch = "wasm32"))]
+fn native_main() -> AppExit {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let key = std::env::var("FASTFPS_KEY").ok();
     match dedicated::Dedicated::from_args(&args, key.as_deref()) {
@@ -66,6 +70,10 @@ fn game() -> AppExit {
                     primary_window: Window {
                         title: config::GAME_NAME.to_string(),
                         present_mode: PresentMode::AutoNoVsync,
+                        // In a browser: draw into the page's canvas, sized to
+                        // the window (web/index.html).
+                        canvas: cfg!(target_arch = "wasm32").then(|| "#game".into()),
+                        fit_canvas_to_parent: true,
                         ..default()
                     }
                     .into(),
@@ -106,7 +114,12 @@ fn game() -> AppExit {
 
 /// A headless server (`--dedicated`, see `dedicated.rs`): the same world and
 /// server code, with no window, GPU, sound or local player.
+#[cfg(not(target_arch = "wasm32"))]
 fn dedicated_server(options: dedicated::Dedicated) -> AppExit {
+    use std::time::Duration;
+
+    use bevy::{app::ScheduleRunnerPlugin, render::settings::WgpuSettings, window::ExitCondition};
+
     App::new()
         // First, so every plugin can see this is a dedicated server.
         .insert_resource(options)

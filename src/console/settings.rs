@@ -1,11 +1,12 @@
 //! Settings that survive a restart. A module writes a [`SaveSetting`] and the
-//! value is stored in `config.cfg` as a console line, replayed at startup.
+//! value is stored as a console line, replayed at startup: in `config.cfg`,
+//! or in a browser, its local storage (`platform.rs`).
 
 use std::collections::BTreeMap;
 
 use bevy::prelude::*;
 
-use crate::{config::GAME_NAME, console::Print};
+use crate::{config::GAME_NAME, console::Print, platform};
 
 /// Remember a setting: it is written to `config.cfg` as `key value` and
 /// replayed on the next launch.
@@ -17,16 +18,6 @@ pub struct SaveSetting {
 
 #[derive(Resource, Default)]
 pub struct Settings(pub BTreeMap<String, String>);
-
-/// `$XDG_CONFIG_HOME/<game name>/config.cfg`, falling back to `~/.config`.
-pub fn config_path() -> Option<std::path::PathBuf> {
-    let base = std::env::var_os("XDG_CONFIG_HOME")
-        .map(std::path::PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config"))
-        })?;
-    Some(base.join(GAME_NAME).join("config.cfg"))
-}
 
 pub fn save_settings(
     mut saves: MessageReader<SaveSetting>,
@@ -41,20 +32,11 @@ pub fn save_settings(
     if !changed {
         return;
     }
-    let Some(path) = config_path() else { return };
     let mut text = format!("// Written by {GAME_NAME}; runs at startup before launch arguments.\n");
     for (key, value) in &settings.0 {
         text.push_str(&format!("{key} {value}\n"));
     }
-    let result = path
-        .parent()
-        .map(std::fs::create_dir_all)
-        .unwrap_or(Ok(()))
-        .and_then(|()| std::fs::write(&path, text));
-    if let Err(e) = result {
-        print.write(Print::error(format!(
-            "could not save {}: {e}",
-            path.display()
-        )));
+    if let Err(e) = platform::save_settings(&text) {
+        print.write(Print::error(e));
     }
 }

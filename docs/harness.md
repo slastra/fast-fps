@@ -248,6 +248,13 @@ To test a binary that is already built (a release build, say) instead of buildin
 HARNESS_BIN=target/release/fast-fps scripts/harness.sh tests/harness/smoke.cfg
 ```
 
+### The browser version
+
+`scripts/web-harness.sh` runs the same scripts in the browser version, in Chrome, with the
+same rules for passing; `-c DIR` shares the browser's storage between scripts, like `-c` here.
+[web.md](web.md) explains it. `smoke.cfg`, `duel.cfg`, `web.cfg` and the settings pair pass
+there.
+
 ## The scenarios that ship
 
 `scripts/check.sh` runs every line of `tests/harness/suite.txt`.

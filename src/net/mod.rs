@@ -7,6 +7,7 @@
 //!
 //! - [`protocol`]: everything that crosses the wire. Start here.
 //! - [`session`]: hosting, connecting and leaving.
+//! - [`transport`]: opening connections (UDP natively; not yet in a browser).
 //! - [`discovery`]: finding servers on the LAN.
 //! - [`admin`]: sending host-only commands to the server you're on.
 //! - [`lobby`]: finding, starting and joining games online.
@@ -16,9 +17,11 @@ mod discovery;
 mod lobby;
 mod protocol;
 mod session;
+mod transport;
 
 pub use protocol::*;
-pub use session::{HostOptions, LocalId, LocalName, start_server};
+pub use session::{LocalId, LocalName};
+pub use transport::{HostOptions, start_server};
 
 use bevy::prelude::*;
 

@@ -25,6 +25,10 @@
 //! With `FASTFPS_KEY` set (64 hex characters) only clients holding a connect
 //! token signed with that key can join; without it anyone can, as on a LAN.
 
+// In a browser only the `Dedicated` type is used (other modules check for
+// it); the server itself never runs there.
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
+
 use std::{
     io::{BufRead, Write},
     net::{SocketAddr, ToSocketAddrs},

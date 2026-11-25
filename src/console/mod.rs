@@ -14,6 +14,7 @@ mod settings;
 mod ui;
 
 pub use script::ScriptHold;
+use script::Scripts;
 pub use settings::SaveSetting;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -53,6 +54,7 @@ pub(super) fn plugin(app: &mut App) {
     .init_resource::<Settings>()
     .add_systems(Startup, queue_launch_commands)
     .init_resource::<ScriptHold>()
+    .init_resource::<Scripts>()
     .add_systems(Update, builtin_commands);
     if headless {
         app.add_systems(PreUpdate, run_script)
@@ -293,6 +295,13 @@ fn collect_prints(
             println!("{text}");
         } else {
             info!("{text}");
+        }
+        // In a browser, the browser's console gets every line too (release
+        // builds compile `info!` out), which is what scripts/web-harness.sh
+        // reads.
+        #[cfg(target_arch = "wasm32")]
+        for line in text.lines() {
+            web_sys::console::log_1(&format!("[fast-fps] {line}").into());
         }
         for line in text.lines() {
             if let Some(file) = file {

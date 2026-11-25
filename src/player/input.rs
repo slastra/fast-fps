@@ -9,7 +9,7 @@ use bevy::{
 use bevy_ahoy::prelude::*;
 use bevy_enhanced_input::prelude::{Press, *};
 
-use crate::{console::Console, player::LocalPlayer};
+use crate::{console::Console, platform, player::LocalPlayer};
 
 pub(super) fn plugin(app: &mut App) {
     app.add_input_context::<PlayerInput>()
@@ -27,6 +27,14 @@ pub(super) fn plugin(app: &mut App) {
 pub struct GameInput {
     pub enabled: bool,
 }
+
+/// Left Ctrl crouches (C does too), except in a browser: there Ctrl+W, with
+/// W held to move, closes the tab, and a page can't stop that. So C alone.
+const CROUCH_KEY: KeyCode = if cfg!(target_arch = "wasm32") {
+    KeyCode::KeyC
+} else {
+    KeyCode::ControlLeft
+};
 
 #[derive(Component, Default)]
 #[component(on_add = PlayerInput::on_add)]
@@ -70,7 +78,7 @@ impl PlayerInput {
                 --
                 Action<Crouch>::new()
                 Bindings [
-                    Binding(KeyCode::ControlLeft)
+                    Binding(CROUCH_KEY)
                     --
                     Binding(KeyCode::KeyC)
                     --
@@ -115,7 +123,19 @@ pub fn grab_cursor(
     keys: Res<ButtonInput<KeyCode>>,
     mut cursor: Single<&mut CursorOptions>,
     window: Single<&Window>,
+    mut page_had_it: Local<bool>,
 ) {
+    // A browser lets go of the mouse on Esc by itself, without telling the
+    // game. Catch up: once the page has held the mouse and no longer does,
+    // it's released. (Right after a click the page doesn't hold it yet.)
+    if let Some(held) = platform::pointer_locked() {
+        let had = std::mem::replace(&mut *page_had_it, held);
+        if had && !held && cursor.grab_mode == CursorGrabMode::Locked {
+            cursor.grab_mode = CursorGrabMode::None;
+            cursor.visible = true;
+            return;
+        }
+    }
     let locked = cursor.grab_mode == CursorGrabMode::Locked;
     let release = console.open || keys.just_pressed(KeyCode::Escape) || !window.focused;
     if locked && release {
@@ -123,7 +143,10 @@ pub fn grab_cursor(
         cursor.visible = true;
     } else if !locked
         && !console.open
-        && (mouse.just_pressed(MouseButton::Left) || console.is_changed())
+        // Closing the console takes the mouse back too, except in a browser,
+        // which only lets a page take the mouse right after a click.
+        && (mouse.just_pressed(MouseButton::Left)
+            || (console.is_changed() && !cfg!(target_arch = "wasm32")))
     {
         cursor.grab_mode = CursorGrabMode::Locked;
         cursor.visible = false;

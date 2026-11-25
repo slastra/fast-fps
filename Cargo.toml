@@ -17,6 +17,14 @@ ehttp = { version = "0.7", features = ["json"] }
 rand = "0.9"
 tracing = { version = "0.1", features = ["max_level_debug", "release_max_level_warn"] }
 
+# Only in the browser build (`scripts/web.sh`, docs/web.md). Randomness comes
+# from the browser's crypto API (two getrandom versions are in the tree), and
+# web-sys reaches the page: localStorage, the URL, pointer lock.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom_02 = { package = "getrandom", version = "0.2", features = ["js"] }
+getrandom_03 = { package = "getrandom", version = "0.3", features = ["wasm_js"] }
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Location", "Storage", "console"] }
+
 [workspace]
 # The lobby (`lobby/`) is its own small program, with no Bevy in it.
 members = ["lobby"]
@@ -24,6 +32,8 @@ members = ["lobby"]
 [features]
 default = ["dev"]
 dev = ["bevy/dynamic_linking", "bevy/file_watcher", "bevy/track_location"]
+# The browser build: WebGPU. Built with --no-default-features --features web.
+web = ["bevy/webgpu", "bevy/web"]
 
 [lints.clippy]
 too_many_arguments = "allow"
@@ -42,6 +52,13 @@ debug-assertions = false
 [profile.release]
 codegen-units = 1
 lto = "thin"
+
+# The browser build (scripts/web.sh): optimized for size, since the browser
+# downloads all of it before the game starts.
+[profile.web-release]
+inherits = "release"
+opt-level = "s"
+lto = "fat"
 
 # Optimize for build time in CI.
 [profile.ci]
