@@ -165,16 +165,18 @@ fn bot_commands(
             let (pos, yaw) = match nums[..] {
                 [x, y, z] => (Vec3::new(x, y, z), 0.0),
                 [x, y, z, yaw] => (Vec3::new(x, y, z), yaw.to_radians()),
-                _ => {
+                _ => match (viewer.single(), camera.single()) {
                     // Five meters in front of you, facing you.
-                    let (Ok(body), Ok(view)) = (viewer.single(), camera.single()) else {
-                        continue;
-                    };
-                    let ahead = (view.forward().as_vec3().with_y(0.0))
-                        .try_normalize()
-                        .unwrap_or(Vec3::NEG_Z);
-                    (body.translation + ahead * 5.0, yaw_of(-ahead))
-                }
+                    (Ok(body), Ok(view)) => {
+                        let ahead = (view.forward().as_vec3().with_y(0.0))
+                            .try_normalize()
+                            .unwrap_or(Vec3::NEG_Z);
+                        (body.translation + ahead * 5.0, yaw_of(-ahead))
+                    }
+                    // Nobody to stand in front of (a dedicated server, or a
+                    // player asking it): a spawn point.
+                    _ => pick_spawn(),
+                },
             };
             next.0 += 1;
             let id = next.0;

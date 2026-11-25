@@ -19,6 +19,7 @@ use crate::{
         CommandRegistry, Console, ConsoleCommand, Print,
         settings::{Settings, config_path},
     },
+    dedicated::Dedicated,
 };
 
 /// Runs `config.cfg`, then the launch arguments:
@@ -27,11 +28,18 @@ pub fn queue_launch_commands(
     mut console: ResMut<Console>,
     mut settings: ResMut<Settings>,
     mut print: MessageWriter<Print>,
+    dedicated: Option<Res<Dedicated>>,
 ) {
-    print.write(Print(format!(
-        "{GAME_NAME}. Press ~ for this console. Try: help, host, find, connect <ip>"
-    )));
-    if let Some(text) = config_path().and_then(|p| std::fs::read_to_string(p).ok()) {
+    if dedicated.is_none() {
+        print.write(Print(format!(
+            "{GAME_NAME}. Press ~ for this console. Try: help, host, find, connect <ip>"
+        )));
+    }
+    // A player's saved settings are for a player's game, not a server.
+    let saved = config_path()
+        .filter(|_| dedicated.is_none())
+        .and_then(|p| std::fs::read_to_string(p).ok());
+    if let Some(text) = saved {
         for line in text.lines() {
             let line = line.trim();
             if line.is_empty() || line.starts_with("//") {

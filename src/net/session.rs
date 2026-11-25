@@ -8,17 +8,17 @@ use std::{
 
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
-use bevy_replicon_renet::{
-    RenetChannelsExt, RenetClient, RenetServer,
+use bevy_replicon_renet2::{
+    RenetChannelsExt,
     netcode::{
-        ClientAuthentication, NetcodeClientTransport, NetcodeServerTransport, ServerAuthentication,
-        ServerConfig,
+        ClientAuthentication, NativeSocket, NetcodeClientTransport, NetcodeServerTransport,
+        ServerAuthentication, ServerSetupConfig,
     },
-    renet::ConnectionConfig,
+    renet2::{ConnectionConfig, RenetClient, RenetServer},
 };
 
 use crate::{
-    config::{DEFAULT_PORT, MAX_CLIENTS, PROTOCOL_ID},
+    config::{CONNECT_TOKEN_SECS, DEFAULT_PORT, MAX_CLIENTS, PROTOCOL_ID},
     console::{Console, ConsoleAppExt, ConsoleCommand, Print, SaveSetting},
     net::{
         discovery::{Beacon, Discovery},
@@ -65,11 +65,7 @@ impl Default for LocalName {
 }
 
 fn connection_config(channels: &RepliconChannels) -> ConnectionConfig {
-    ConnectionConfig {
-        server_channels_config: channels.server_configs(),
-        client_channels_config: channels.client_configs(),
-        ..default()
-    }
+    ConnectionConfig::from_channels(channels.server_configs(), channels.client_configs())
 }
 
 fn now() -> Duration {
@@ -112,7 +108,13 @@ pub fn net_commands(
                     .arg(0)
                     .and_then(|p| p.parse().ok())
                     .unwrap_or(DEFAULT_PORT);
-                match start_server(&mut commands, &channels, port) {
+                let options = HostOptions {
+                    port,
+                    key: None,
+                    public: None,
+                    beacon: true,
+                };
+                match start_server(&mut commands, &channels, &options) {
                     Ok(()) => {
                         let lan = lan_ip()
                             .map(|ip| format!("{ip}:{port}"))
@@ -224,23 +226,46 @@ pub fn net_commands(
     }
 }
 
-fn start_server(
+/// How to host: `host` on a LAN, or a dedicated server (`dedicated.rs`).
+pub struct HostOptions {
+    pub port: u16,
+    /// With a key, only clients holding a connect token signed with it can
+    /// join (see `lobby/`). Without one, anyone can.
+    pub key: Option<[u8; 32]>,
+    /// The address clients use, if not the socket's own. Connect tokens name
+    /// it, and the server checks they do.
+    pub public: Option<SocketAddr>,
+    /// Announce the game on the LAN.
+    pub beacon: bool,
+}
+
+pub fn start_server(
     commands: &mut Commands,
     channels: &RepliconChannels,
-    port: u16,
+    options: &HostOptions,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, port))?;
-    let config = ServerConfig {
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, options.port))?;
+    let address = options.public.unwrap_or(socket.local_addr()?);
+    let authentication = match options.key {
+        Some(private_key) => ServerAuthentication::Secure { private_key },
+        None => ServerAuthentication::Unsecure,
+    };
+    let config = ServerSetupConfig {
         current_time: now(),
+        max_token_lifetime: CONNECT_TOKEN_SECS,
         max_clients: MAX_CLIENTS,
         protocol_id: PROTOCOL_ID,
-        authentication: ServerAuthentication::Unsecure,
-        public_addresses: Default::default(),
+        authentication,
+        socket_addresses: vec![vec![address]],
     };
-    let transport = NetcodeServerTransport::new(config, socket)?;
+    let transport = NetcodeServerTransport::new(config, NativeSocket::new(socket)?)?;
     commands.insert_resource(RenetServer::new(connection_config(channels)));
     commands.insert_resource(transport);
 
+    if !options.beacon {
+        return Ok(());
+    }
+    let port = options.port;
     let beacon = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0))?;
     beacon.set_broadcast(true)?;
     commands.insert_resource(Beacon {
@@ -261,11 +286,13 @@ fn start_client(
     let authentication = ClientAuthentication::Unsecure {
         client_id,
         protocol_id: PROTOCOL_ID,
+        socket_id: 0,
         server_addr,
         user_data: None,
     };
-    let transport = NetcodeClientTransport::new(now(), authentication, socket)?;
-    commands.insert_resource(RenetClient::new(connection_config(channels)));
+    let transport = NetcodeClientTransport::new(now(), authentication, NativeSocket::new(socket)?)?;
+    // UDP is unreliable, so renet does its own resends.
+    commands.insert_resource(RenetClient::new(connection_config(channels), false));
     commands.insert_resource(transport);
     Ok(client_id)
 }

@@ -26,7 +26,7 @@ use bevy::{
 };
 use bevy_ahoy::prelude::*;
 use bevy_replicon::prelude::*;
-use bevy_replicon_renet::RenetServer;
+use bevy_replicon_renet2::renet2::RenetServer;
 
 use crate::{
     avatar::Ragdoll,

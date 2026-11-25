@@ -21,6 +21,14 @@ pub const MAX_CLIENTS: usize = 16;
 /// Peers must agree on this to connect. It is a hash of [`GAME_NAME`], so two
 /// different games built from this project never join each other.
 pub const PROTOCOL_ID: u64 = fnv1a(GAME_NAME);
+/// Seconds a lobby's connect token stays valid. A game server also refuses
+/// tokens older than this.
+pub const CONNECT_TOKEN_SECS: u16 = 30;
+/// How many times a second a dedicated server (`--dedicated`) runs its game
+/// loop. A listen server runs at its frame rate instead.
+pub const DEDICATED_TICK_HZ: f64 = 60.0;
+/// A dedicated server with no players for this many seconds shuts down.
+pub const IDLE_SECS: f32 = 120.0;
 
 // --- Player ----------------------------------------------------------------
 

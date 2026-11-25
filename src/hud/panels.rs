@@ -6,7 +6,7 @@ use bevy::{
     prelude::*,
 };
 use bevy_replicon::prelude::*;
-use bevy_replicon_renet::{RenetClient, RenetServer};
+use bevy_replicon_renet2::renet2::{RenetClient, RenetServer};
 
 use crate::{
     config::MAX_HEALTH,

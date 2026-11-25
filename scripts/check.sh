@@ -36,8 +36,9 @@ if [ $QUICK = 1 ]; then
 else
     while IFS= read -r line; do
         case $line in '' | '#'*) continue ;; esac
-        # shellcheck disable=SC2086  # the line is a list of arguments
-        step "harness: $line" scripts/harness.sh $line
+        # The line is a list of arguments, quoted as in a shell.
+        eval "args=($line)"
+        step "harness: $line" scripts/harness.sh "${args[@]}"
     done <tests/harness/suite.txt
 fi
 

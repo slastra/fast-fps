@@ -24,6 +24,23 @@ use crate::{
 #[derive(Component, Clone, Copy)]
 pub struct PlayerClient(pub ClientId);
 
+/// Server-only: the order players and bots arrived in, counting from 0.
+/// The duel lines people up by it.
+#[derive(Component, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub struct Joined(pub u64);
+
+/// Number each new player or bot as it arrives.
+pub fn stamp_joined(
+    mut commands: Commands,
+    new: Query<Entity, (With<Player>, Without<Joined>)>,
+    mut next: Local<u64>,
+) {
+    for entity in &new {
+        commands.entity(entity).insert(Joined(*next));
+        *next += 1;
+    }
+}
+
 /// Server-only: whether the hitbox is currently the crouched shape.
 #[derive(Component, Default, PartialEq, Clone, Copy)]
 pub struct CrouchedHitbox(bool);

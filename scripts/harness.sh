@@ -17,6 +17,9 @@
 #   -s WxH    display size, which is also the screenshot size (default 1280x720)
 #   -c DIR    settings folder to use, to test that settings survive a restart
 #             (default: a fresh one per instance)
+#   -S ARGS   first start a dedicated server, `fast-fps --dedicated ARGS`, for
+#             the scripts to connect to (e.g. -S "--port 27591"). Its output
+#             goes to server/server.log, and the run fails if it panics.
 #   -h        this help
 #
 # An instance passes when its script reached `quit`, the game printed no
@@ -41,14 +44,16 @@ MODE=headless
 TIMEOUT=120
 SIZE=1280x720
 CONFIG_BASE=""
-usage() { sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; }
-while getopts "vwt:s:c:h" opt; do
+SERVER_ARGS=""
+usage() { sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; }
+while getopts "vwt:s:c:S:h" opt; do
     case $opt in
     v) MODE=nested ;;
     w) MODE=window ;;
     t) TIMEOUT=$OPTARG ;;
     s) SIZE=$OPTARG ;;
     c) CONFIG_BASE=$(realpath -m "$OPTARG") ;;
+    S) SERVER_ARGS=$OPTARG ;;
     h) usage; exit 0 ;;
     *) usage >&2; exit 2 ;;
     esac
@@ -112,8 +117,9 @@ HOST_WAYLAND=${WAYLAND_DISPLAY:-}
 
 GAME_PIDS=()
 SWAY_PIDS=()
+SERVER_PID=""
 cleanup() {
-    for pid in "${GAME_PIDS[@]:-}" "${SWAY_PIDS[@]:-}"; do
+    for pid in "${GAME_PIDS[@]:-}" "${SWAY_PIDS[@]:-}" "$SERVER_PID"; do
         [ -n "$pid" ] && kill "$pid" 2>/dev/null
     done
     wait 2>/dev/null
@@ -147,6 +153,28 @@ start_sway() {
     done
     return 1
 }
+
+# A dedicated server for the scripts to join. It needs no display.
+if [ -n "$SERVER_ARGS" ]; then
+    mkdir -p "$RUN_DIR/server"
+    SERVER_LOG=$RUN_DIR/server/server.log
+    # shellcheck disable=SC2086 # SERVER_ARGS is a list of arguments
+    env "LD_LIBRARY_PATH=$LIBS${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" \
+        "BEVY_ASSET_ROOT=$ASSETS" "XDG_CONFIG_HOME=$RUN_DIR/server/config" \
+        "$BIN" --dedicated $SERVER_ARGS </dev/null >"$SERVER_LOG" 2>&1 &
+    SERVER_PID=$!
+    for _ in $(seq 150); do
+        grep -q '^@fastfps ready' "$SERVER_LOG" 2>/dev/null && break
+        kill -0 "$SERVER_PID" 2>/dev/null || break
+        sleep 0.2
+    done
+    if ! grep -q '^@fastfps ready' "$SERVER_LOG"; then
+        echo "harness: the dedicated server did not start, see $SERVER_LOG" >&2
+        tail -5 "$SERVER_LOG" >&2
+        exit 2
+    fi
+    echo "started dedicated server ($SERVER_ARGS)"
+fi
 
 NAMES=()
 SCRIPTS=()
@@ -282,6 +310,20 @@ for idx in "${!NAMES[@]}"; do
     fi
     for n in "${notes[@]:-}"; do [ -n "$n" ] && say "      note: $n"; done
 done
+
+if [ -n "$SERVER_ARGS" ]; then
+    sed -i 's/\x1b\[[0-9;]*m//g' "$SERVER_LOG"
+    # Bevy reports, as an ERROR, render setup it skips with no GPU backend.
+    server_problems=$(grep -E 'panicked at| ERROR ' "$SERVER_LOG" |
+        grep -v 'Sub app did not exist' | cut -c1-240 | head -5)
+    if [ -n "$server_problems" ]; then
+        overall=1
+        say "FAIL  dedicated server  ($SERVER_LOG)"
+        echo "$server_problems" | sed 's/^/      /' | tee -a "$REPORT"
+    else
+        say "PASS  dedicated server"
+    fi
+fi
 
 say "results: $RUN_DIR"
 if [ $overall = 0 ]; then say "RESULT: PASS"; else say "RESULT: FAIL"; fi

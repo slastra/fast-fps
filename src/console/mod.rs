@@ -26,37 +26,52 @@ use bevy::{
     prelude::*,
 };
 
-use crate::console::{
-    script::{queue_launch_commands, run_script},
-    settings::{Settings, save_settings},
-    ui::{render_console, spawn_console_ui},
+use crate::{
+    console::{
+        script::{queue_launch_commands, run_script},
+        settings::{Settings, save_settings},
+        ui::{render_console, spawn_console_ui},
+    },
+    dedicated::Dedicated,
 };
 
 const MAX_LINES: usize = 400;
 const VISIBLE_LINES: usize = 24;
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<Console>()
-        .init_resource::<CommandRegistry>()
-        .add_message::<ConsoleCommand>()
-        .add_message::<Print>()
-        .add_message::<SaveSetting>()
-        .init_resource::<Settings>()
-        .add_systems(Startup, (spawn_console_ui, queue_launch_commands))
-        .init_resource::<ScriptHold>()
+    // A dedicated server has no window: no panel and no typing. Its lines
+    // come from stdin (`dedicated.rs`) and its output goes to stdout.
+    let headless = app.world().contains_resource::<Dedicated>();
+    app.insert_resource(Console {
+        stdout: headless,
+        ..default()
+    })
+    .init_resource::<CommandRegistry>()
+    .add_message::<ConsoleCommand>()
+    .add_message::<Print>()
+    .add_message::<SaveSetting>()
+    .init_resource::<Settings>()
+    .add_systems(Startup, queue_launch_commands)
+    .init_resource::<ScriptHold>()
+    .add_systems(Update, builtin_commands);
+    if headless {
+        app.add_systems(PreUpdate, run_script)
+            .add_systems(PostUpdate, collect_prints);
+    } else {
         // Commands are issued in PreUpdate so every handler, in any module,
         // sees them during Update of the same frame.
-        .add_systems(
-            PreUpdate,
-            (toggle_console, edit_input, run_script)
-                .chain()
-                .after(InputSystems),
-        )
-        .add_systems(Update, builtin_commands)
-        .add_systems(
-            PostUpdate,
-            (collect_prints, render_console, save_settings).chain(),
-        );
+        app.add_systems(Startup, spawn_console_ui)
+            .add_systems(
+                PreUpdate,
+                (toggle_console, edit_input, run_script)
+                    .chain()
+                    .after(InputSystems),
+            )
+            .add_systems(
+                PostUpdate,
+                (collect_prints, render_console, save_settings).chain(),
+            );
+    }
 
     app.console_command("help", "", "list commands")
         .console_command("clear", "", "clear the console")
@@ -107,6 +122,9 @@ pub struct Console {
     /// Lines from `exec` scripts, run in order and paused by `wait`.
     script: VecDeque<String>,
     wait: f32,
+    /// Also print every line to stdout (a dedicated server, where the log
+    /// level hides `info!` in release builds).
+    stdout: bool,
 }
 
 impl Console {
@@ -271,7 +289,11 @@ fn collect_prints(
         std::env::var_os("CONSOLE_LOG").and_then(|path| std::fs::File::create(path).ok())
     });
     for Print(text) in prints.read() {
-        info!("{text}");
+        if console.stdout {
+            println!("{text}");
+        } else {
+            info!("{text}");
+        }
         for line in text.lines() {
             if let Some(file) = file {
                 let _ = writeln!(file, "{line}");

@@ -14,7 +14,7 @@ mod protocol;
 mod session;
 
 pub use protocol::*;
-pub use session::{LocalId, LocalName};
+pub use session::{HostOptions, LocalId, LocalName, start_server};
 
 use bevy::prelude::*;
 

@@ -10,7 +10,7 @@ avian3d = { version = "0.8", features = ["serialize", "bevy_diagnostic"] }
 bevy_ahoy = { version = "0.3", default-features = false }
 bevy_enhanced_input = "0.27"
 bevy_replicon = "0.45"
-bevy_replicon_renet = "0.21"
+bevy_replicon_renet2 = { version = "1.0.1", features = ["native_transport"] }
 serde = { version = "1", features = ["derive"] }
 rand = "0.9"
 tracing = { version = "0.1", features = ["max_level_debug", "release_max_level_warn"] }

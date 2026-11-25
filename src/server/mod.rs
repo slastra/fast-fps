@@ -21,13 +21,16 @@ mod players;
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
+pub use players::PlayerClient;
+
+use crate::dedicated::Dedicated;
 use crate::server::{
     combat::{BotShot, Died, receive_bot_shots, receive_fire, receive_melee},
     dummies::{ensure_dummies, move_dummies, tick_downed},
     grenades::{receive_throws, tick_grenades},
     players::{
         ensure_local_player, hitboxes_follow_pose, on_client_authorized, on_client_removed,
-        receive_moves, receive_names, receive_select, receive_suicide,
+        receive_moves, receive_names, receive_select, receive_suicide, stamp_joined,
     },
 };
 
@@ -38,7 +41,9 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(
             PreUpdate,
             (
-                ensure_local_player,
+                // A dedicated server has nobody sitting at it.
+                ensure_local_player.run_if(not(resource_exists::<Dedicated>)),
+                stamp_joined,
                 ensure_dummies,
                 receive_names,
                 receive_moves,

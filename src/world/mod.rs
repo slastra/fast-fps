@@ -17,7 +17,13 @@ pub use arena::{DUMMIES, SPAWNS};
 
 use bevy::prelude::*;
 
+use crate::dedicated::Dedicated;
+
 pub(super) fn plugin(app: &mut App) {
-    app.add_systems(Startup, arena::spawn_level)
-        .add_plugins((lights::plugin, dummy::plugin));
+    app.add_systems(Startup, arena::spawn_level);
+    // Flickering lamps and dressed-up dummies are for looking at. A
+    // dedicated server only needs the colliders.
+    if !app.world().contains_resource::<Dedicated>() {
+        app.add_plugins((lights::plugin, dummy::plugin));
+    }
 }

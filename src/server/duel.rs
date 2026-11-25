@@ -29,7 +29,7 @@ use crate::{
     net::{Duel, DuelPhase, Feed, Health, Out, Player, Pose, Respawn, Score},
     server::{
         bots::Bot,
-        players::{PlayerClient, pick_spawn, respawn_at},
+        players::{Joined, PlayerClient, pick_spawn, respawn_at},
     },
 };
 
@@ -215,6 +215,7 @@ fn run_duel(
         Option<&mut Bot>,
         &mut Health,
     )>,
+    joined: Query<&Joined>,
     mut respawns: MessageWriter<ToClients<Respawn>>,
     mut commands: Commands,
 ) {
@@ -225,10 +226,16 @@ fn run_duel(
     // replicated when something happens rather than every frame.
     let mut duel = shared.clone();
 
-    // Whoever is here when the duel starts lines up by id, so the host (0)
-    // goes first. Anyone who arrives later joins the back.
-    let mut present: Vec<u64> = players.iter().map(|p| p.1.owner).collect();
-    present.sort();
+    // Whoever is here when the duel starts lines up in the order they
+    // arrived, so on a listen server the host goes first. Anyone who arrives
+    // later joins the back.
+    let mut arrived: Vec<(Option<Joined>, u64)> = players
+        .iter()
+        .map(|p| (joined.get(p.0).ok().copied(), p.1.owner))
+        .collect();
+    // Not yet numbered (this very frame) goes last.
+    arrived.sort_by_key(|&(joined, owner)| (joined.is_none(), joined, owner));
+    let present: Vec<u64> = arrived.into_iter().map(|(_, owner)| owner).collect();
     sync_queue(&mut duel, &mut clock.0, &present);
 
     let mut marks = [false; 2];
