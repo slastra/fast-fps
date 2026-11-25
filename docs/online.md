@@ -78,6 +78,21 @@ docker run -e FASTFPS_KEY=$(openssl rand -hex 32) -e PUBLIC_HOST=<address player
 Put the lobby behind HTTPS (a reverse proxy such as Coolify's). The game ports are plain UDP
 and must be published directly, not through the proxy, and open in the server's firewall.
 
+### How fps.lastra.us is hosted
+
+- `.github/workflows/server-image.yml` builds the image on every push to `master` and
+  publishes it as `ghcr.io/slastra/fast-fps-server` (`latest` and the commit's hash). The
+  Dockerfile builds the dependencies in a layer of their own, which later builds reuse, so
+  only the first build compiles all of Bevy.
+- Coolify (the main instance, project `fast-fps`) runs that image: the lobby on port 8080
+  behind its proxy at `https://fps.lastra.us`, and UDP 27100-27107 published straight to the
+  host. `FASTFPS_KEY` is set there as a secret, and `PUBLIC_HOST` is `fps.lastra.us`.
+- With the `COOLIFY_DEPLOY_URL` and `COOLIFY_TOKEN` repository secrets set, the workflow tells
+  Coolify to redeploy after each build, so the server always matches `master`. A player
+  whose game is older is told to update it.
+- The UDP range is open in the Linode firewall. The DNS record is not proxied by Cloudflare,
+  since the game ports must reach the host directly.
+
 ### Limits
 
 - One new game per address every 10 seconds, at most one per game port, 16 players a game.

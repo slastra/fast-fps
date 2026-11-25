@@ -5,15 +5,27 @@
 #   docker run -e FASTFPS_KEY=... -e PUBLIC_HOST=<your address> \
 #       -p 8080:8080 -p 27100-27107:27100-27107/udp fast-fps-server
 
-FROM rust:1-trixie AS build
+FROM rust:1-trixie AS chef
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         pkg-config libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev \
     && rm -rf /var/lib/apt/lists/*
+RUN cargo install cargo-chef --locked
 WORKDIR /src
+
+# The dependencies (Bevy and the rest) are built in a layer of their own,
+# which a rebuild reuses unless Cargo.toml or Cargo.lock change.
+FROM chef AS plan
 COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS build
+COPY --from=plan /src/recipe.json recipe.json
 # No default features: those are for development (the engine as a shared
 # library, asset hot-reloading).
+RUN cargo chef cook --release --no-default-features -p fast-fps --recipe-path recipe.json \
+    && cargo chef cook --release -p lobby --recipe-path recipe.json
+COPY . .
 RUN cargo build --release --no-default-features -p fast-fps \
     && cargo build --release -p lobby
 
