@@ -42,4 +42,4 @@ jobs:
       - name: Redeploy on Coolify
         if: env.COOLIFY_DEPLOY_URL != ''
         run: |
-          curl -fsS -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_DEPLOY_URL"
+          curl -fsS -X POST -H "Authorization: Bearer $COOLIFY_TOKEN" "$COOLIFY_DEPLOY_URL"
