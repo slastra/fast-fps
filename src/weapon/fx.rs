@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use bevy::prelude::*;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
-use super::{Class, WeaponKind};
+use super::{Class, WeaponKind, blast::Smoke};
 use crate::{
     avatar::rig::AvatarRig,
     net::{Player, ShotFx},
@@ -247,6 +247,7 @@ fn remote_shots(
     listener: Single<&GlobalTransform, With<WorldCamera>>,
     avatars: Query<(&Player, &AvatarRig)>,
     globals: Query<&GlobalTransform>,
+    mut smoke: MessageWriter<Smoke>,
 ) {
     // Shotguns send one message per pellet; flash and play sound once per blast.
     let mut blasts: Vec<Vec3> = Vec::new();
@@ -263,6 +264,9 @@ fn remote_shots(
         let gun = shot.weapon.def().class == Class::Gun;
         if gun {
             tracer(&mut commands, &fx, start, shot.end, shot.weapon);
+            if shot.weapon == WeaponKind::Flintlock {
+                smoke.write(Smoke { at: start, dir });
+            }
         }
         if shot.normal != Vec3::ZERO {
             impact(

@@ -35,8 +35,16 @@ pub fn grenade(
 ) {
     let dt = time.delta_secs();
     let slot = WeaponKind::Grenade.index();
+    // A new life brings a fresh grenade and a loaded flintlock (each duel
+    // round starts with a respawn).
     if respawns.read().count() > 0 {
         arsenal.ammo[slot] = WeaponKind::Grenade.def().mag;
+        let flint = WeaponKind::Flintlock;
+        arsenal.ammo[flint.index()] = flint.def().mag;
+        arsenal.priming = None;
+        if arsenal.current == flint {
+            arsenal.reloading = 0.0;
+        }
     }
     if arsenal.current != WeaponKind::Grenade {
         return;

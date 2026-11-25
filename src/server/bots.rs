@@ -3,22 +3,26 @@
 //! They exist to be looked at and shot. A bot follows simple orders from the
 //! console (walk, strafe, crouch, jump, reload, fire) so every animation can
 //! be seen offline and scripted in the test harness. Their shots are for show
-//! and do no damage.
+//! and do no damage, except in a duel: there a bot walks to its mark, turns
+//! at "Draw!" and fires for real (see [`duel_bots`]; `bot_duel_aim` sets how
+//! often it hits).
 //!
 //! Bots only exist when hosting or offline; clients see them as players.
 
 use avian3d::prelude::*;
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
+use rand::Rng;
 
 use crate::{
-    config::{GRAVITY, MAX_HEALTH, SHOT_RANGE},
+    config::{DUEL_MARKS, GRAVITY, MAX_HEALTH, SHOT_RANGE},
     console::{ConsoleAppExt, ConsoleCommand, Print},
-    net::{Health, Loadout, Player, PlayerName, Pose, Score, ShotFx},
+    net::{Duel, DuelPhase, Health, Loadout, Out, Player, PlayerName, Pose, Score, ShotFx},
     physics::Layer,
     player::LocalPlayer,
     server::{
-        combat::Died,
+        combat::{BotShot, Died},
+        duel::on_mark,
         players::{hitbox, pick_spawn},
     },
     weapon::{Class, WeaponKind},
@@ -26,12 +30,32 @@ use crate::{
 
 const JUMP_SPEED: f32 = 8.4;
 const EYE: f32 = 0.8;
+/// Walking pace on the way to a duel mark.
+const WALK: f32 = 3.2;
+/// How fast a dueling bot turns to face its opponent, radians per second.
+const TURN: f32 = 7.0;
+/// A dueling bot's reaction to "Draw!", in seconds (random in this range).
+const REACTION: (f32, f32) = (0.45, 0.8);
+
+/// How often a dueling bot's shot is on target, 0 (never) to 1 (always).
+#[derive(Resource)]
+pub struct BotDuelAim(pub f32);
+
+impl Default for BotDuelAim {
+    fn default() -> Self {
+        Self(0.5)
+    }
+}
 
 pub(super) fn plugin(app: &mut App) {
     let authority = in_state(ClientState::Disconnected);
     app.init_resource::<NextBot>()
+        .init_resource::<BotDuelAim>()
         .add_systems(Update, bot_commands)
-        .add_systems(Update, (drive, respawn).run_if(authority));
+        .add_systems(
+            Update,
+            (duel_bots, drive, respawn).chain().run_if(authority),
+        );
 
     app.console_command(
         "bot",
@@ -42,6 +66,11 @@ pub(super) fn plugin(app: &mut App) {
         "bot_do",
         "<id|all> <order> [arg]",
         "idle walk run strafe back crouch stand jump reload fire weapon look pin free remove",
+    )
+    .console_command(
+        "bot_duel_aim",
+        "<0..1>",
+        "how often a dueling bot hits: 0 never, 1 always (default 0.5)",
     );
 }
 
@@ -72,6 +101,25 @@ pub struct Bot {
     shots: u32,
     cooldown: f32,
     pitch: f32,
+    /// Somewhere to walk to (a duel mark).
+    goal: Option<Vec3>,
+    /// Seconds left before a dueling bot fires, once "Draw!" is called.
+    react: Option<f32>,
+}
+
+impl Bot {
+    /// Stand here, facing this way, and stop whatever it was doing.
+    pub fn place(&mut self, pos: Vec3, yaw: f32) {
+        self.home = pos.with_y(pos.y - 0.3);
+        self.yaw = yaw;
+        self.travel = Travel::Idle;
+        self.distance = 0.0;
+        self.jump = None;
+        self.reload = 0.0;
+        self.shots = 0;
+        self.goal = None;
+        self.react = None;
+    }
 }
 
 /// The yaw that turns -Z to face along `dir`.
@@ -88,13 +136,23 @@ fn bot_commands(
     viewer: Query<&Transform, With<LocalPlayer>>,
     camera: Query<&GlobalTransform, With<crate::player::ViewRig>>,
     mut bots: Query<(Entity, &mut Bot, &mut Loadout)>,
+    mut aim_setting: ResMut<BotDuelAim>,
 ) {
     for cmd in cmds.read() {
-        if cmd.name != "bot" && cmd.name != "bot_do" {
+        if cmd.name != "bot" && cmd.name != "bot_do" && cmd.name != "bot_duel_aim" {
             continue;
         }
         if *state.get() != ClientState::Disconnected {
             print.write(Print::error("bots only work when hosting or offline"));
+            continue;
+        }
+        if cmd.name == "bot_duel_aim" {
+            match cmd.arg(0).and_then(|a| a.parse::<f32>().ok()) {
+                Some(aim) if (0.0..=1.0).contains(&aim) => aim_setting.0 = aim,
+                _ => {
+                    print.write(Print::error("usage: bot_duel_aim <0..1>"));
+                }
+            }
             continue;
         }
         if cmd.name == "bot" {
@@ -144,6 +202,8 @@ fn bot_commands(
                     shots: 0,
                     cooldown: 0.0,
                     pitch: 0.0,
+                    goal: None,
+                    react: None,
                 },
             ));
             print.write(Print(format!(
@@ -222,7 +282,21 @@ fn drive(
     for (mut bot, mut pose, player, loadout) in &mut bots {
         let bot = &mut *bot;
         let crouch_scale = if bot.crouch { 0.4 } else { 1.0 };
-        let (mut pos, mut yaw, mut vel) = (bot.home, bot.yaw, Vec3::ZERO);
+        // Walking to a goal moves home itself, so the bot stays there after.
+        let mut walking = Vec3::ZERO;
+        if let Some(goal) = bot.goal {
+            let to = (goal - bot.home).with_y(0.0);
+            if to.length() <= WALK * dt {
+                bot.home = goal.with_y(bot.home.y);
+                bot.goal = None;
+            } else {
+                let dir = to.normalize();
+                bot.home += dir * WALK * dt;
+                bot.yaw = yaw_of(dir);
+                walking = dir * WALK;
+            }
+        }
+        let (mut pos, mut yaw, mut vel) = (bot.home, bot.yaw, walking);
 
         if let Travel::Move(local, speed) = bot.travel {
             let speed = speed * crouch_scale;
@@ -309,8 +383,95 @@ fn drive(
     }
 }
 
-/// A killed bot starts over at a spawn point, like a player would.
-fn respawn(mut deaths: MessageReader<Died>, mut bots: Query<&mut Bot>) {
+/// A dueling bot: walk to the mark, wait for "Draw!", turn, and fire the
+/// flintlock at the other duelist, reloading between shots.
+fn duel_bots(
+    time: Res<Time>,
+    duels: Query<&Duel>,
+    aim: Res<BotDuelAim>,
+    mut bots: Query<(Entity, &mut Bot, &Player, &mut Loadout, Has<Out>)>,
+    poses: Query<(&Player, &Pose)>,
+    mut shots: MessageWriter<BotShot>,
+) {
+    let Ok(duel) = duels.single() else {
+        return;
+    };
+    let dt = time.delta_secs();
+    let mut rng = rand::rng();
+    for (entity, mut bot, player, mut loadout, out) in &mut bots {
+        let Some(slot) = duel.slot(player.owner).filter(|_| !out) else {
+            bot.goal = None;
+            bot.react = None;
+            continue;
+        };
+        loadout.set_if_neq(Loadout(WeaponKind::Flintlock));
+        match duel.phase {
+            DuelPhase::Walk | DuelPhase::Steady => {
+                bot.react = None;
+                if bot.goal.is_none() && !on_mark(slot, bot.home) {
+                    bot.goal = Some(DUEL_MARKS[slot]);
+                }
+            }
+            DuelPhase::Draw => {
+                let opponent = duel.duelists[1 - slot];
+                let Some((_, target)) = poses.iter().find(|(p, _)| p.owner == opponent) else {
+                    continue;
+                };
+                let origin = bot.home + Vec3::Y * EYE;
+                let chest = target.pos + Vec3::Y * 0.2;
+                let to = chest - origin;
+                // Turn to face them, quickly but not instantly.
+                let want = yaw_of(to);
+                let turn = (want - bot.yaw + std::f32::consts::PI)
+                    .rem_euclid(std::f32::consts::TAU)
+                    - std::f32::consts::PI;
+                bot.yaw += turn.clamp(-TURN * dt, TURN * dt);
+                bot.pitch = (to.y / to.with_y(0.0).length().max(0.1)).atan();
+                let react = bot
+                    .react
+                    .unwrap_or_else(|| rng.random_range(REACTION.0..REACTION.1))
+                    - dt;
+                bot.react = Some(react);
+                if react > 0.0 || bot.reload > 0.0 {
+                    continue;
+                }
+                bot.yaw = want;
+                // A miss goes wide by a few degrees to one side.
+                let miss = if rng.random::<f32>() < aim.0 {
+                    0.0
+                } else {
+                    let side = if rng.random_bool(0.5) { 1.0 } else { -1.0 };
+                    rng.random_range(3.0_f32..5.0).to_radians() * side
+                };
+                let dir = Quat::from_rotation_y(miss) * to.normalize_or(Vec3::NEG_Z);
+                shots.write(BotShot {
+                    shooter: entity,
+                    weapon: WeaponKind::Flintlock,
+                    origin,
+                    dir,
+                });
+                let def = WeaponKind::Flintlock.def();
+                bot.reload = def.reload_secs + def.delay;
+            }
+            _ => {
+                bot.goal = None;
+                bot.react = None;
+            }
+        }
+    }
+}
+
+/// A killed bot starts over at a spawn point, like a player would. In a
+/// duel the duel decides where everyone goes.
+fn respawn(
+    mut deaths: MessageReader<Died>,
+    mut bots: Query<&mut Bot>,
+    duels: Query<(), With<Duel>>,
+) {
+    if !duels.is_empty() {
+        deaths.clear();
+        return;
+    }
     for Died(entity) in deaths.read() {
         if let Ok(mut bot) = bots.get_mut(*entity) {
             let (pos, yaw) = pick_spawn();

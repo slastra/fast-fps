@@ -6,7 +6,10 @@ use bevy::prelude::*;
 use bevy_ahoy::prelude::*;
 use rand::{Rng, rngs::StdRng};
 
-use super::fx::{self, Decals, FxAssets, FxRng};
+use super::{
+    blast::Smoke,
+    fx::{self, Decals, FxAssets, FxRng},
+};
 use crate::{
     config::SHOT_RANGE,
     console::ConsoleCommand,
@@ -80,6 +83,7 @@ pub fn fire(
     fx: Res<FxAssets>,
     mut fx_rng: ResMut<FxRng>,
     mut decals: ResMut<Decals>,
+    mut smoke: MessageWriter<Smoke>,
     sounds: Res<Sounds>,
 ) {
     let dt = time.delta_secs();
@@ -105,17 +109,49 @@ pub fn fire(
         } else {
             arsenal.buffered_click > 0.0
         };
-    if !want || arsenal.reloading > 0.0 || arsenal.draw > 0.0 || arsenal.cooldown > 0.0 {
-        return;
-    }
-    scripted.primary = scripted.primary.saturating_sub(1);
-    arsenal.buffered_click = 0.0;
     let kind = arsenal.current;
-    if arsenal.ammo[kind.index()] == 0 {
-        if clicked || scripted_shot {
-            play(&mut commands, &sounds.click, 0.5);
+    // A flintlock's spark is burning down: it fires when it reaches the
+    // powder, wherever you are aiming by then.
+    let primed = match arsenal.priming {
+        Some(left) if left > dt => {
+            arsenal.priming = Some(left - dt);
+            return;
         }
-        return;
+        Some(_) => {
+            arsenal.priming = None;
+            true
+        }
+        None => false,
+    };
+    if !primed {
+        if !want
+            || arsenal.locked
+            || arsenal.reloading > 0.0
+            || arsenal.draw > 0.0
+            || arsenal.cooldown > 0.0
+        {
+            // A locked trigger forgets the click instead of firing it later.
+            if arsenal.locked {
+                arsenal.buffered_click = 0.0;
+                scripted.primary = 0;
+            }
+            return;
+        }
+        scripted.primary = scripted.primary.saturating_sub(1);
+        arsenal.buffered_click = 0.0;
+        if arsenal.ammo[kind.index()] == 0 {
+            if clicked || scripted_shot {
+                play(&mut commands, &sounds.click, 0.5);
+            }
+            return;
+        }
+        if def.delay > 0.0 {
+            arsenal.priming = Some(def.delay);
+            play(&mut commands, &sounds.flint_pan, 0.5);
+            let pan = camera.transform_point(muzzles.0[kind.index()] * Vec3::new(1.0, 1.0, 0.0));
+            fx::sparks(&mut commands, &fx, pan, rig.up().as_vec3(), &mut fx_rng.0);
+            return;
+        }
     }
     arsenal.ammo[kind.index()] -= 1;
     arsenal.cooldown = def.interval;
@@ -168,6 +204,14 @@ pub fn fire(
         };
         fx::tracer(&mut commands, &fx, muzzle, end, kind);
     }
+    if kind == WeaponKind::Flintlock {
+        // From a little way out: the view model's muzzle is right at your eye.
+        let dir = aim * Vec3::NEG_Z;
+        smoke.write(Smoke {
+            at: origin + dir * 0.8 - Vec3::Y * 0.1,
+            dir,
+        });
+    }
     shots.write(Fire {
         weapon: kind,
         origin,
@@ -215,7 +259,12 @@ pub fn reload(
         arsenal.reloading = def.reload_secs;
         arsenal.zoom = 0;
         arsenal.spray = 0.0;
-        play(&mut commands, &sounds.reload, 0.6);
+        let sound = if kind == WeaponKind::Flintlock {
+            &sounds.flint_reload
+        } else {
+            &sounds.reload
+        };
+        play(&mut commands, sound, 0.6);
     }
 }
 

@@ -10,6 +10,7 @@ mod avatar;
 mod config;
 mod console;
 mod debug;
+mod duel;
 mod hud;
 mod lowpoly;
 mod net;
@@ -75,6 +76,7 @@ fn main() -> AppExit {
             hud::plugin,
             debug::plugin,
             avatar::plugin,
+            duel::plugin,
         ))
         .run()
 }

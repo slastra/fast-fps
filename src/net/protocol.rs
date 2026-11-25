@@ -35,7 +35,9 @@ pub(super) fn register(app: &mut App) {
         .add_server_message::<HitConfirm>(Channel::Ordered)
         .add_server_message::<Respawn>(Channel::Ordered)
         .add_server_message::<Feed>(Channel::Ordered)
-        .add_server_message::<Exploded>(Channel::Ordered);
+        .add_server_message::<Exploded>(Channel::Ordered)
+        .replicate::<Duel>()
+        .replicate::<Out>();
 }
 
 /// A player. `owner` is the netcode client id, or `0` for the host / offline player.
@@ -240,3 +242,72 @@ impl Feed {
         }
     }
 }
+
+/// The duel game mode, on one replicated entity that exists only while a
+/// duel is on (`mode duel`). The server runs it (`server/duel.rs`); clients
+/// draw the marks and the banners from it.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[require(Transform, Visibility)]
+pub struct Duel {
+    pub phase: DuelPhase,
+    /// `Player::owner` of the two duelists. Meaningless while `Waiting`.
+    pub duelists: [u64; 2],
+    /// Rounds won this duel, by the duelist in the same slot.
+    pub wins: [u8; 2],
+    /// Counts from 1.
+    pub round: u8,
+    /// Whether each duelist is standing on their mark.
+    pub on_mark: [bool; 2],
+    /// Everyone in the game, in the order they get to duel. The two duelists
+    /// are at the front.
+    pub queue: Vec<u64>,
+}
+
+impl Duel {
+    /// The duelist slot (0 or 1) of `owner`, if they're dueling.
+    pub fn slot(&self, owner: u64) -> Option<usize> {
+        if self.phase == DuelPhase::Waiting {
+            return None;
+        }
+        self.duelists.iter().position(|&d| d == owner)
+    }
+
+    /// The first to win this many rounds wins the duel.
+    pub const WINS: u8 = 3;
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+pub enum DuelPhase {
+    /// Fewer than two players.
+    Waiting,
+    /// The duelists walk from back to back to their marks.
+    Walk,
+    /// Both on their marks; "Draw!" is coming.
+    Steady,
+    /// Fire!
+    Draw,
+    /// Someone fell, or time ran out (`winner: None`).
+    RoundOver { winner: Option<u8> },
+    /// Someone has won the duel.
+    Over { winner: u8 },
+}
+
+impl DuelPhase {
+    /// A short name for the console and the probe.
+    pub fn name(self) -> &'static str {
+        match self {
+            DuelPhase::Waiting => "waiting",
+            DuelPhase::Walk => "walk",
+            DuelPhase::Steady => "steady",
+            DuelPhase::Draw => "draw",
+            DuelPhase::RoundOver { .. } => "round_over",
+            DuelPhase::Over { .. } => "over",
+        }
+    }
+}
+
+/// On a player who isn't in play right now: dead for the rest of a duel
+/// round, or watching someone else's duel. Not drawn, can't be hurt, and
+/// can't fire.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct Out;

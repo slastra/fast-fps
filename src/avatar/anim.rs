@@ -187,6 +187,14 @@ fn hold(weapon: WeaponKind) -> Hold {
             grip_l: Vec3::new(-0.22, -0.08, 0.12),
             blade: 0.1,
         },
+        // A duelist's stance: one arm out at shoulder height, the other hand
+        // tucked at the small of the back.
+        WeaponKind::Flintlock => Hold {
+            offset: Vec3::new(0.14, 0.14, -0.48),
+            grip_r: Vec3::new(0.0, -0.05, 0.06),
+            grip_l: Vec3::new(-0.3, -0.3, 0.42),
+            blade: -0.15,
+        },
     }
 }
 

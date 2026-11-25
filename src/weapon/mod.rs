@@ -91,7 +91,7 @@ pub(super) fn plugin(app: &mut App) {
 
     app.console_command(
         "weapon",
-        "<ak|mp5|glock|shotgun|sniper|knife|grenade>",
+        "<ak|mp5|glock|shotgun|sniper|knife|grenade|flintlock>",
         "switch weapons",
     )
     .console_command("zoom", "<level>", "scope zoom level (sniper only)")

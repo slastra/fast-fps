@@ -9,11 +9,14 @@ use rand::Rng;
 use crate::{
     config::MAX_HEALTH,
     net::{
-        Damaged, Feed, Health, Loadout, LocalName, MoveInput, Player, PlayerName, Pose, Respawn,
-        Score, SelectWeapon, SetName, Suicide,
+        Damaged, Duel, Feed, Health, Loadout, LocalName, MoveInput, Player, PlayerName, Pose,
+        Respawn, Score, SelectWeapon, SetName, Suicide,
     },
     physics::Layer,
-    server::combat::Died,
+    server::{
+        combat::Died,
+        duel::{start_spot, watch_spot},
+    },
     world::SPAWNS,
 };
 
@@ -231,16 +234,29 @@ pub fn receive_select(
 /// Send a fresh spawn point to the client; its pose follows on the next move.
 pub fn respawn(client: ClientId, respawns: &mut MessageWriter<ToClients<Respawn>>) {
     let (pos, yaw) = pick_spawn();
+    respawn_at(client, pos, yaw, respawns);
+}
+
+/// Send the client to a chosen spot.
+pub fn respawn_at(
+    client: ClientId,
+    pos: Vec3,
+    yaw: f32,
+    respawns: &mut MessageWriter<ToClients<Respawn>>,
+) {
     respawns.write(ToClients {
         targets: SendTargets::Single(client),
         message: Respawn { pos, yaw },
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn receive_suicide(
     mut requests: MessageReader<FromClient<Suicide>>,
     clients: Query<(Entity, &PlayerClient)>,
     mut players: Query<(&mut Health, &mut Score, &PlayerName, &Pose, &Loadout)>,
+    owners: Query<&Player>,
+    duels: Query<&Duel>,
     mut respawns: MessageWriter<ToClients<Respawn>>,
     mut feed: MessageWriter<ToClients<Feed>>,
     mut damaged: MessageWriter<ToClients<Damaged>>,
@@ -250,6 +266,14 @@ pub fn receive_suicide(
         let Some(entity) = find_player(*client_id, &clients) else {
             continue;
         };
+        // In a duel, `kill` (or falling off the world) just puts you back
+        // where you belong this round.
+        if let Ok(duel) = duels.single() {
+            let slot = owners.get(entity).ok().and_then(|p| duel.slot(p.owner));
+            let (pos, yaw) = slot.map_or_else(watch_spot, start_spot);
+            respawn_at(*client_id, pos, yaw, &mut respawns);
+            continue;
+        }
         let Ok((mut health, mut score, name, pose, loadout)) = players.get_mut(entity) else {
             continue;
         };

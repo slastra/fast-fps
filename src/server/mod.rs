@@ -9,9 +9,11 @@
 //! - [`grenades`]: thrown grenades, their flight and their blast.
 //! - [`dummies`]: the practice targets.
 //! - [`bots`]: practice bots driven from the console.
+//! - [`duel`]: the duel game mode (`mode duel`).
 
 mod bots;
 mod combat;
+mod duel;
 mod dummies;
 mod grenades;
 mod players;
@@ -20,7 +22,7 @@ use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
 use crate::server::{
-    combat::{Died, receive_fire, receive_melee},
+    combat::{BotShot, Died, receive_bot_shots, receive_fire, receive_melee},
     dummies::{ensure_dummies, move_dummies, tick_downed},
     grenades::{receive_throws, tick_grenades},
     players::{
@@ -32,6 +34,7 @@ use crate::server::{
 pub(super) fn plugin(app: &mut App) {
     let authority = in_state(ClientState::Disconnected);
     app.add_message::<Died>()
+        .add_message::<BotShot>()
         .add_systems(
             PreUpdate,
             (
@@ -55,9 +58,9 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (hitboxes_follow_pose, tick_grenades).run_if(authority),
+            (hitboxes_follow_pose, tick_grenades, receive_bot_shots).run_if(authority),
         )
         .add_observer(on_client_authorized)
         .add_observer(on_client_removed)
-        .add_plugins((bots::plugin, grenades::plugin));
+        .add_plugins((bots::plugin, duel::plugin, grenades::plugin));
 }

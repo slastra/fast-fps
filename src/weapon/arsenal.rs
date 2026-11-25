@@ -105,6 +105,15 @@ pub struct Arsenal {
     /// A grenade being charged: seconds the button has been held, and
     /// whether it is a lob (right button).
     pub charge: Option<(f32, bool)>,
+    /// A flintlock shot on its way: seconds until the spark lights the
+    /// powder and it fires.
+    pub priming: Option<f32>,
+    /// Set by the duel (`duel.rs`): the trigger does nothing (before
+    /// "Draw!", or while out), only the flintlock may be drawn, and you are
+    /// out of the round (so your gun isn't shown).
+    pub locked: bool,
+    pub flintlock_only: bool,
+    pub out: bool,
     pub rng: StdRng,
 }
 
@@ -130,6 +139,10 @@ impl Default for Arsenal {
             swing: Swing::None,
             swing_t: 1.0,
             charge: None,
+            priming: None,
+            locked: false,
+            flintlock_only: false,
+            out: false,
             rng: StdRng::seed_from_u64(1),
         }
     }
@@ -159,6 +172,7 @@ impl Arsenal {
         self.swing = Swing::None;
         self.swing_t = 1.0;
         self.charge = None;
+        self.priming = None;
         true
     }
 
@@ -194,6 +208,9 @@ pub fn weapon_commands(
             continue;
         }
         match cmd.arg(0).and_then(WeaponKind::parse) {
+            Some(kind) if arsenal.flintlock_only && kind != WeaponKind::Flintlock => {
+                print.write(Print("a duel is flintlock only".into()));
+            }
             Some(kind) => {
                 if arsenal.select(kind) {
                     select.write(SelectWeapon(kind));
@@ -201,7 +218,7 @@ pub fn weapon_commands(
             }
             None => {
                 print.write(Print::error(
-                    "usage: weapon <ak|mp5|glock|shotgun|sniper|knife|grenade>",
+                    "usage: weapon <ak|mp5|glock|shotgun|sniper|knife|grenade|flintlock>",
                 ));
             }
         }
@@ -218,7 +235,7 @@ pub fn switch_weapon(
     sounds: Res<Sounds>,
 ) {
     let scroll: f32 = wheel.read().map(|w| w.y).sum();
-    if !input.enabled {
+    if !input.enabled || arsenal.flintlock_only {
         return;
     }
     // Number keys pick weapons in the order they are listed in `WeaponKind::ALL`.

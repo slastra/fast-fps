@@ -138,7 +138,7 @@ allows a tiny rounding error); anything else compares as text, ignoring case, wi
 | `players` | everyone in the game, bots included |
 | `bots` | practice bots |
 | `health`, `kills`, `deaths` | yours |
-| `weapon` | `ak`, `mp5`, `glock`, `shotgun`, `sniper`, `knife`, `grenade` |
+| `weapon` | `ak`, `mp5`, `glock`, `shotgun`, `sniper`, `knife`, `grenade`, `flintlock` |
 | `ammo` | rounds left in the current weapon (the knife has 0, the grenade 1 or 0) |
 | `reloading`, `scoped` | `1` or `0` |
 | `spread` | your accuracy cone in degrees; bigger is less accurate |
@@ -150,6 +150,10 @@ allows a tiny rounding error); anything else compares as text, ignoring case, wi
 | `grenades` | grenades in flight |
 | `explosions` | grenade explosions this machine has seen |
 | `blast_x`, `blast_z` | where the last one went off |
+| `duel` | `none`, or the duel's phase: `waiting`, `walk`, `steady`, `draw`, `round_over`, `over` |
+| `duel_round`, `duel_wins` | the round number, and the wins as `1-0` |
+| `duel_me`, `duel_slot` | `duelist`, `spectator` or `none`; your duelist slot `0` or `1` (`-1` if not dueling) |
+| `out`, `on_mark` | `1` if you're out of play (dead this round, or watching); `1` if you're standing on your mark |
 | `sens`, `fov` | view settings |
 | `sky` | `night`, `dusk`, `dawn` or `day` |
 | `name`, `time`, `fps` | your name, game seconds since start, frame rate |

@@ -38,11 +38,14 @@ Run it from this folder:
 Click to grab the mouse. WASD to move, Space to jump, Ctrl to crouch, left
 click to fire, R to reload, 1-5 for the guns, Tab for scores. 6 is the knife
 (right click stabs). 7 is the grenade: hold left click longer to throw it
-farther. Press ~ for the console, where everything else lives:
+farther. 8 is the flintlock pistol. Press ~ for the console, where everything
+else lives:
 
     host                 start a LAN game
     connect              join the first LAN game found (or: connect <ip>)
     exec cfg/bots.cfg    practice bots to shoot at
+    mode duel            a flintlock duel: walk to your mark, wait for the bell
+    mode ffa             back to free-for-all
     exec cfg/low.cfg     lighter graphics, if it runs slowly
     sky next             change the time of day
     help                 every command

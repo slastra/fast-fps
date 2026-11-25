@@ -53,6 +53,7 @@ deal damage through `Hits` so kills and the feed work like every other weapon.
    - add a `WeaponDef` to `DEFS`, **in the same position as in the enum**, with
      `class: Class::Gun`
    - optionally give it a spray pattern (a list of `(shot, x degrees, y degrees)` keyframes)
+   - `delay` is the time from the click to the shot (the flintlock's spark); 0 for most guns
 2. **`src/weapon/models.rs`**: add its shape to `model` (boxes and cylinders, a muzzle point,
    and where it rests on screen).
 3. **`src/sound/mod.rs`**: add its shot sound to the `shots` array, in the same position
@@ -192,6 +193,24 @@ fn publish(mut probe: ResMut<Probe>, coins: Query<&Coins>) {
 
 Then scripts can `assert coins == 3` and `wait_until coins >= 1 5`. Built-in values are in
 `collect` in `src/debug/probe.rs`; add to it for anything that belongs there.
+
+## Add a game mode
+
+Duel (`src/server/duel.rs` and `src/duel.rs`) is the worked example. A mode is three pieces:
+
+1. **State everyone can see.** One replicated component on its own entity (`Duel` in
+   `src/net/protocol.rs`, added to `register`), spawned by a console command and despawned to
+   end the mode. Its existence is the mode: other code asks "is there a `Duel`?".
+2. **Rules on the server.** A system in `src/server/` that runs only while the entity exists.
+   Keep the round logic a plain function of the state (`duel::step`) so it can be unit
+   tested without the game. Change who may attack in `Hits::allows` and what a kill does in
+   `Hits::hurt` (`src/server/combat.rs`), so every weapon follows the mode's rules.
+3. **What players see.** A client plugin that reads the replicated state: banners, marks,
+   sounds, and the limits the weapon code checks (`Arsenal::locked`, `flintlock_only`).
+
+Put a player out of play with the replicated `Out` marker: they aren't drawn, can't be hurt
+and can't fire. Publish the mode's state to the probe (`duel`, `duel_round`, ...) so a
+scenario can follow it, as `tests/harness/duel.cfg` does.
 
 ## Add a bot order
 

@@ -12,7 +12,7 @@ the shot, so pick the pump first.
 
 `gen` needs OPENROUTER_API_KEY (about $0.15 per minute of audio; a take is
 a few seconds). `use` needs only ffmpeg. The game embeds the .wav files, so
-rebuild after `use`. Every sound has a code-made fallback in src/sound/synth.rs.
+rebuild after `use`.
 """
 
 import json
@@ -148,6 +148,36 @@ SOUNDS = {
         "A sniper scope zooming in: one quick, soft mechanical click. Very short.",
         0.3,
         True,
+    ),
+    "flintlock": (
+        "A single antique flintlock pistol shot: a quick fizzing whoosh of the powder pan, "
+        "then a deep, booming black-powder blast with a soft rolling echo. One shot only.",
+        1.6,
+        False,
+    ),
+    "flint_pan": (
+        "A flintlock hammer striking the frizzen: a sharp flinty snap and a short fizzing "
+        "sizzle of priming powder. Very short.",
+        0.4,
+        True,
+    ),
+    "flint_reload": (
+        "Reloading an antique flintlock pistol: powder poured from a flask, a ramrod sliding "
+        "down the barrel and tamping twice, then the hammer cocked back with a click. About "
+        "two and a half seconds.",
+        2.8,
+        False,
+    ),
+    "duel_mark": (
+        "A single low, deep war drum beat, dry and solemn. One hit only.",
+        0.9,
+        True,
+    ),
+    "duel_draw": (
+        "A single strike of an old town church bell, one clear loud tone ringing out and "
+        "fading. One strike only.",
+        2.5,
+        False,
     ),
 }
 

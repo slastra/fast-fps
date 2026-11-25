@@ -19,11 +19,12 @@ Launch arguments are console commands with a `+`: `cargo run -- +name alice +hos
 | `sens <value>` | Mouse sensitivity (default 0.07). Saved. |
 | `fov <degrees>` | Field of view (default 80). Saved. |
 | `sky [night\|dusk\|dawn\|day\|next]` | Time of day (default dusk). Saved. |
-| `weapon <ak\|mp5\|glock\|shotgun\|sniper\|knife\|grenade>` | Switch weapons (also keys 1-7, the wheel, and Q). |
+| `weapon <ak\|mp5\|glock\|shotgun\|sniper\|knife\|grenade\|flintlock>` | Switch weapons (also keys 1-8, the wheel, and Q). In a duel only the flintlock. |
 | `reload` | Reload (also R). |
 | `scoreboard <0\|1>` | Keep the scoreboard up (holding Tab also shows it). |
 | `zoom <level>` | Sniper scope level; 0 is unscoped (also right click). |
-| `kill` | Respawn somewhere else. |
+| `kill` | Respawn somewhere else. In a duel, back to your start or watching spot. |
+| `mode [ffa\|duel]` | The game mode (host or offline): free-for-all, or a flintlock duel. With no argument, prints the current one. |
 | `quit` | Exit. |
 
 Saved settings live in `~/.config/<game name>/config.cfg`, which is itself a list of console
@@ -35,6 +36,7 @@ commands run at startup.
 |---|---|
 | `bot [x y z yaw]` | Spawn a practice bot (host or offline). With no arguments: 5 m in front of you. |
 | `bot_do <id\|all> <order> [arg]` | `idle walk run strafe back crouch stand jump reload fire weapon look pin free remove` |
+| `bot_duel_aim <0..1>` | How often a dueling bot hits: 0 never, 1 always (default 0.5). In a duel, bots walk to their marks and fire back on their own. |
 
 ## Scripts and tests
 

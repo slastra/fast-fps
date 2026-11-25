@@ -4,6 +4,8 @@
 //! - weapons: `weapon/defs.rs`
 //! - the map: `world/arena.rs`
 
+use bevy::math::Vec3;
+
 /// The game's name, taken from `Cargo.toml`. It names the window, the settings
 /// folder and the LAN beacon, and seeds [`PROTOCOL_ID`], so renaming the
 /// package is all it takes to make a copy of this project its own game.
@@ -46,6 +48,26 @@ pub const KILL_HEIGHT: f32 = -15.0;
 pub const SHOT_RANGE: f32 = 250.0;
 /// How long a practice dummy stays down.
 pub const DUMMY_DOWN_SECS: f32 = 3.0;
+
+// --- Duel (`mode duel`, see server/duel.rs) --------------------------------
+
+/// Where each round starts: the duelists stand back to back here, in the
+/// open yard south of the keep. Collider-center height, like `SPAWNS`.
+pub const DUEL_START: Vec3 = Vec3::new(0.0, 1.2, 15.0);
+/// The two marks the duelists walk to, one each way along the yard.
+pub const DUEL_MARKS: [Vec3; 2] = [Vec3::new(0.0, 0.0, 9.0), Vec3::new(0.0, 0.0, 21.0)];
+/// How close to the center of a mark counts as standing on it, in meters.
+pub const DUEL_MARK_RADIUS: f32 = 0.9;
+/// Seconds from both duelists reaching their marks to "Draw!", picked at
+/// random in this range so nobody can count it.
+pub const DUEL_STEADY_SECS: (f32, f32) = (1.5, 3.0);
+/// After "Draw!", a round with no winner ends after this long.
+pub const DUEL_ROUND_SECS: f32 = 45.0;
+/// How long the round's result and the duel's result stay on screen.
+pub const DUEL_ROUND_OVER_SECS: f32 = 3.0;
+pub const DUEL_OVER_SECS: f32 = 5.0;
+/// Where everyone who isn't dueling watches from: the yard's west edge.
+pub const DUEL_WATCH: Vec3 = Vec3::new(-9.5, 1.2, 15.0);
 
 // --- Corpses ---------------------------------------------------------------
 

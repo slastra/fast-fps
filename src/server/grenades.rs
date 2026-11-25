@@ -10,7 +10,7 @@ use bevy::{platform::collections::HashMap, prelude::*};
 use bevy_replicon::prelude::*;
 
 use crate::{
-    net::{Exploded, Health, Player, Pose, Projectile, Throw},
+    net::{Duel, Exploded, Health, Player, Pose, Projectile, Throw},
     physics::Layer,
     server::{
         combat::{Died, Hits},
@@ -46,12 +46,17 @@ pub fn receive_throws(
     clients: Query<(Entity, &PlayerClient)>,
     players: Query<(&Player, &Pose)>,
     spatial: SpatialQuery,
+    duels: Query<(), With<Duel>>,
     mut commands: Commands,
 ) {
     for Died(entity) in deaths.read() {
         thrown.0.remove(entity);
     }
     for FromClient { client_id, message } in throws.read() {
+        // A duel is pistols only.
+        if !duels.is_empty() {
+            continue;
+        }
         let Some(thrower) = find_player(*client_id, &clients) else {
             continue;
         };

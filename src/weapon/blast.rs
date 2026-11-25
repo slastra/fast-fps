@@ -37,6 +37,8 @@ struct BlastAssets {
     flash_mat: Handle<StandardMaterial>,
     puff: Handle<Mesh>,
     puff_mat: Handle<StandardMaterial>,
+    /// See-through gray for gun smoke, so a shot doesn't blind the shooter.
+    haze_mat: Handle<StandardMaterial>,
 }
 
 /// Motion of a grenade as last seen, to hear it bounce.
@@ -56,16 +58,31 @@ struct Puff {
     rise: Vec3,
 }
 
+/// Black-powder smoke from a flintlock's muzzle, pointing along `dir`. Sent
+/// by your own shot and by other players' (see `fx::remote_shots`).
+#[derive(Message, Clone, Copy)]
+pub struct Smoke {
+    pub at: Vec3,
+    pub dir: Vec3,
+}
+
 /// The explosion's light, dimming fast.
 #[derive(Component)]
 struct BlastLight(f32);
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Explosions>()
+        .add_message::<Smoke>()
         .add_systems(Startup, make_assets)
         .add_systems(
             Update,
-            (dress_grenades, follow_grenades, explosions, age_puffs),
+            (
+                dress_grenades,
+                follow_grenades,
+                explosions,
+                muzzle_smoke,
+                age_puffs,
+            ),
         );
 }
 
@@ -101,6 +118,12 @@ fn make_assets(
         }),
         puff: meshes.add(puff),
         puff_mat: materials.add(StandardMaterial {
+            perceptual_roughness: 1.0,
+            ..default()
+        }),
+        haze_mat: materials.add(StandardMaterial {
+            base_color: Color::srgba(0.85, 0.84, 0.8, 0.42),
+            alpha_mode: AlphaMode::Blend,
             perceptual_roughness: 1.0,
             ..default()
         }),
@@ -259,6 +282,44 @@ fn explosions(
         let shake = (1.0 - distance / (GRENADE.radius * 3.0)).clamp(0.0, 1.0);
         if shake > 0.0 {
             arsenal.kick_punch += Vec2::new(rng.random_range(-1.0..1.0), 1.0) * 4.0 * shake;
+        }
+    }
+}
+
+/// A thick cloud that bursts out of the barrel, hangs, and drifts up.
+/// Unlit by any light of its own and casting no shadow, so it costs little.
+fn muzzle_smoke(
+    mut smokes: MessageReader<Smoke>,
+    assets: Res<BlastAssets>,
+    mut fx_rng: ResMut<FxRng>,
+    mut commands: Commands,
+) {
+    for smoke in smokes.read() {
+        let rng = &mut fx_rng.0;
+        let dir = smoke.dir.normalize_or(Vec3::NEG_Z);
+        for i in 0..12 {
+            let along = i as f32 / 12.0;
+            let jitter = Vec3::new(
+                rng.random_range(-1.0..1.0),
+                rng.random_range(-0.5..1.0),
+                rng.random_range(-1.0..1.0),
+            );
+            commands.spawn((
+                Mesh3d(assets.puff.clone()),
+                MeshMaterial3d(assets.haze_mat.clone()),
+                Transform::from_translation(smoke.at)
+                    .with_rotation(Quat::from_rotation_y(rng.random_range(0.0..TAU)))
+                    .with_scale(Vec3::splat(0.02)),
+                Puff {
+                    age: 0.0,
+                    life: rng.random_range(1.6..2.6),
+                    size: 0.08 + along * 0.24 + rng.random_range(0.0..0.06),
+                    // Faster puffs end up farther out, so the cloud stretches
+                    // along the shot and hangs a few meters ahead.
+                    rise: dir * (1.0 + along * 3.5) + jitter * 0.3 + Vec3::Y * 0.3,
+                },
+                no_shadow(),
+            ));
         }
     }
 }

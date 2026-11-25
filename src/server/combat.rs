@@ -2,7 +2,7 @@
 //! in these directions"; the server ray casts each one against the world and
 //! the hitboxes and decides what it hit. Knife attacks work the same way with
 //! a short swept sphere. [`Hits`] applies the damage for every weapon,
-//! grenades included.
+//! grenades included, and knows the duel's rules (see `server/duel.rs`).
 
 use avian3d::prelude::*;
 use bevy::{ecs::system::SystemParam, prelude::*};
@@ -11,11 +11,12 @@ use bevy_replicon::prelude::*;
 use crate::{
     config::{DUMMY_DOWN_SECS, MAX_HEALTH, SHOT_RANGE},
     net::{
-        Damaged, Downed, Feed, Fire, Health, HitConfirm, Melee, Player, PlayerName, Pose, Respawn,
-        Score, ShotFx,
+        Damaged, Downed, Duel, DuelPhase, Feed, Fire, Health, HitConfirm, Melee, Out, Player,
+        PlayerName, Pose, Respawn, Score, ShotFx,
     },
     physics::Layer,
     server::{
+        duel::{DuelClock, record_loss},
         dummies::DownTimer,
         players::{PlayerClient, find_player, respawn},
     },
@@ -25,6 +26,15 @@ use crate::{
 /// Server-only: a player entity was killed (bots use this to respawn).
 #[derive(Message, Clone, Copy)]
 pub struct Died(pub Entity);
+
+/// Server-only: a bot pulled the trigger (bots have no client to send `Fire`).
+#[derive(Message, Clone, Copy)]
+pub struct BotShot {
+    pub shooter: Entity,
+    pub weapon: WeaponKind,
+    pub origin: Vec3,
+    pub dir: Vec3,
+}
 
 /// Height above the collider center where the head starts.
 pub fn head_line(pose: &Pose) -> f32 {
@@ -46,7 +56,19 @@ pub struct Hurt {
 #[derive(SystemParam)]
 pub struct Hits<'w, 's> {
     pub clients: Query<'w, 's, (Entity, &'static PlayerClient)>,
-    pub targets: Query<'w, 's, (&'static mut Health, &'static Pose, Has<Player>, Has<Downed>)>,
+    #[allow(clippy::type_complexity)]
+    pub targets: Query<
+        'w,
+        's,
+        (
+            &'static mut Health,
+            &'static Pose,
+            Has<Player>,
+            Has<Downed>,
+            Has<Out>,
+        ),
+    >,
+    duels: Query<'w, 's, (&'static mut Duel, &'static mut DuelClock)>,
     scores: Query<'w, 's, &'static mut Score>,
     names: Query<'w, 's, &'static PlayerName>,
     pub owners: Query<'w, 's, &'static Player>,
@@ -70,10 +92,10 @@ impl Hits<'_, '_> {
         head: bool,
         weapon: WeaponKind,
     ) -> Option<Hurt> {
-        let Ok((mut health, pose, is_player, downed)) = self.targets.get_mut(target) else {
+        let Ok((mut health, pose, is_player, downed, out)) = self.targets.get_mut(target) else {
             return None;
         };
-        if downed {
+        if downed || out {
             return None;
         }
         let mut hurt = Hurt {
@@ -94,7 +116,12 @@ impl Hits<'_, '_> {
             ));
             return Some(hurt);
         }
-        health.0 = MAX_HEALTH;
+        // In a duel the fallen stay at 0 until the next round heals them.
+        health.0 = if self.duels.is_empty() {
+            MAX_HEALTH
+        } else {
+            0.0
+        };
         if let Ok(mut score) = self.scores.get_mut(target) {
             score.deaths += 1;
         }
@@ -118,11 +145,37 @@ impl Hits<'_, '_> {
                 headshot: head,
             },
         });
-        if let Ok((_, victim_client)) = self.clients.get(target) {
+        if let Ok((mut duel, mut clock)) = self.duels.single_mut() {
+            // In a duel the fallen stay down until the next round.
+            self.commands.entity(target).insert(Out);
+            if let Some(slot) = self
+                .owners
+                .get(target)
+                .ok()
+                .and_then(|p| duel.slot(p.owner))
+            {
+                record_loss(&mut duel, &mut clock.0, slot);
+            }
+        } else if let Ok((_, victim_client)) = self.clients.get(target) {
             respawn(victim_client.0, &mut self.respawns);
         }
         self.died.write(Died(target));
         Some(hurt)
+    }
+
+    /// Whether `shooter` may attack with `weapon` right now. Always, except
+    /// in a duel: only the flintlock, only after "Draw!", and only while
+    /// still standing.
+    pub fn allows(&self, shooter: Entity, weapon: WeaponKind) -> bool {
+        let Ok((duel, _)) = self.duels.single() else {
+            return true;
+        };
+        let out = self.targets.get(shooter).is_ok_and(|t| t.4);
+        let dueling = self
+            .owners
+            .get(shooter)
+            .is_ok_and(|p| duel.slot(p.owner).is_some());
+        weapon == WeaponKind::Flintlock && duel.phase == DuelPhase::Draw && dueling && !out
     }
 
     /// Tell everyone a target was hit (for blood, flinches and ragdolls).
@@ -159,95 +212,160 @@ impl Hits<'_, '_> {
     }
 }
 
+/// Fire `dirs` (one per pellet) from `origin`: ray cast each, damage what
+/// they hit, tell everyone who was hurt, and confirm hits to the shooter.
+/// Returns the effects for other players to draw.
+pub fn shoot(
+    spatial: &SpatialQuery,
+    hits: &mut Hits,
+    shooter: Entity,
+    weapon: WeaponKind,
+    origin: Vec3,
+    dirs: &[Vec3],
+) -> Vec<ShotFx> {
+    let shooter_id = hits.owners.get(shooter).map(|p| p.owner).unwrap_or(0);
+    let def = weapon.def();
+    let filter = SpatialQueryFilter::from_mask([Layer::World, Layer::Hitbox])
+        .with_excluded_entities([shooter]);
+
+    let mut effects = Vec::with_capacity(dirs.len());
+    let mut any_hit = false;
+    let mut any_head = false;
+    let mut any_kill = false;
+    // A target killed by an earlier pellet has already respawned at full
+    // health, so the rest of this blast must not touch it.
+    let mut killed: Vec<Entity> = Vec::new();
+    // One `Damaged` per target per blast: (target, summed dir, first point, result).
+    let mut wounds: Vec<(Entity, Vec3, Vec3, Hurt)> = Vec::new();
+
+    for dir in dirs {
+        let Ok(dir) = Dir3::new(*dir) else {
+            continue;
+        };
+        let hit = spatial.cast_ray(origin, dir, SHOT_RANGE, true, &filter);
+        let (end, normal) = match hit {
+            Some(hit) => (origin + dir * hit.distance, hit.normal),
+            None => (origin + dir * SHOT_RANGE, Vec3::ZERO),
+        };
+        let mut flesh = false;
+        if let Some(hit) = hit
+            && !killed.contains(&hit.entity)
+            && let Ok((_, pose, ..)) = hits.targets.get(hit.entity)
+        {
+            let head = end.y > pose.pos.y + head_line(pose);
+            let falloff = def.falloff_per_10m.powf(hit.distance / 10.0);
+            let mult = if head { def.head_mult } else { 1.0 };
+            if let Some(hurt) = hits.hurt(
+                shooter,
+                hit.entity,
+                def.damage * mult * falloff,
+                head,
+                weapon,
+            ) {
+                flesh = true;
+                any_hit = true;
+                any_head |= head;
+                if hurt.killed {
+                    any_kill = true;
+                    killed.push(hit.entity);
+                }
+                match wounds.iter_mut().find(|w| w.0 == hit.entity) {
+                    Some(w) => {
+                        w.1 += dir.as_vec3();
+                        w.3.killed |= hurt.killed;
+                    }
+                    None => wounds.push((hit.entity, dir.as_vec3(), end, hurt)),
+                }
+            }
+        }
+        effects.push(ShotFx {
+            shooter: shooter_id,
+            weapon,
+            origin,
+            end,
+            normal,
+            flesh,
+        });
+    }
+
+    for (target, dir, point, hurt) in wounds {
+        hits.wounded(target, &hurt, dir, point, weapon);
+    }
+    if any_hit {
+        hits.confirm(shooter, any_head, any_kill);
+    }
+    effects
+}
+
 pub fn receive_fire(
     mut shots: MessageReader<FromClient<Fire>>,
     spatial: SpatialQuery,
+    time: Res<Time>,
     mut hits: Hits,
     mut fx: MessageWriter<ToClients<ShotFx>>,
+    // When each player's flintlock is loaded again, so a client can't fire it
+    // faster than it reloads.
+    mut loaded: Local<bevy::platform::collections::HashMap<Entity, f32>>,
 ) {
+    let now = time.elapsed_secs();
     for FromClient { client_id, message } in shots.read() {
         let Some(shooter) = find_player(*client_id, &hits.clients) else {
             continue;
         };
-        let shooter_id = hits.owners.get(shooter).map(|p| p.owner).unwrap_or(0);
         let def = message.weapon.def();
-        let origin = message.origin;
         if def.class != Class::Gun
-            || !origin.is_finite()
+            || !message.origin.is_finite()
             || message.dirs.len() > def.pellets as usize
+            || !hits.allows(shooter, message.weapon)
         {
             continue;
         }
-        let filter = SpatialQueryFilter::from_mask([Layer::World, Layer::Hitbox])
-            .with_excluded_entities([shooter]);
-
-        let mut any_hit = false;
-        let mut any_head = false;
-        let mut any_kill = false;
-        // A target killed by an earlier pellet has already respawned at full
-        // health, so the rest of this blast must not touch it.
-        let mut killed: Vec<Entity> = Vec::new();
-        // One `Damaged` per target per blast: (target, summed dir, first point, result).
-        let mut wounds: Vec<(Entity, Vec3, Vec3, Hurt)> = Vec::new();
-
-        for dir in &message.dirs {
-            let Ok(dir) = Dir3::new(*dir) else {
+        if message.weapon == WeaponKind::Flintlock {
+            // A little slack for network jitter.
+            if loaded.get(&shooter).is_some_and(|&at| now < at - 0.25) {
                 continue;
-            };
-            let hit = spatial.cast_ray(origin, dir, SHOT_RANGE, true, &filter);
-            let (end, normal) = match hit {
-                Some(hit) => (origin + dir * hit.distance, hit.normal),
-                None => (origin + dir * SHOT_RANGE, Vec3::ZERO),
-            };
-            let mut flesh = false;
-            if let Some(hit) = hit
-                && !killed.contains(&hit.entity)
-                && let Ok((_, pose, ..)) = hits.targets.get(hit.entity)
-            {
-                let head = end.y > pose.pos.y + head_line(pose);
-                let falloff = def.falloff_per_10m.powf(hit.distance / 10.0);
-                let mult = if head { def.head_mult } else { 1.0 };
-                if let Some(hurt) = hits.hurt(
-                    shooter,
-                    hit.entity,
-                    def.damage * mult * falloff,
-                    head,
-                    message.weapon,
-                ) {
-                    flesh = true;
-                    any_hit = true;
-                    any_head |= head;
-                    if hurt.killed {
-                        any_kill = true;
-                        killed.push(hit.entity);
-                    }
-                    match wounds.iter_mut().find(|w| w.0 == hit.entity) {
-                        Some(w) => {
-                            w.1 += dir.as_vec3();
-                            w.3.killed |= hurt.killed;
-                        }
-                        None => wounds.push((hit.entity, dir.as_vec3(), end, hurt)),
-                    }
-                }
             }
+            loaded.insert(shooter, now + def.reload_secs);
+        }
+        for effect in shoot(
+            &spatial,
+            &mut hits,
+            shooter,
+            message.weapon,
+            message.origin,
+            &message.dirs,
+        ) {
             fx.write(ToClients {
                 targets: SendTargets::AllExcept(*client_id),
-                message: ShotFx {
-                    shooter: shooter_id,
-                    weapon: message.weapon,
-                    origin,
-                    end,
-                    normal,
-                    flesh,
-                },
+                message: effect,
             });
         }
+    }
+}
 
-        for (target, dir, point, hurt) in wounds {
-            hits.wounded(target, &hurt, dir, point, message.weapon);
+/// Shots from bots that fight back (in a duel). Same rules as players'.
+pub fn receive_bot_shots(
+    mut shots: MessageReader<BotShot>,
+    spatial: SpatialQuery,
+    mut hits: Hits,
+    mut fx: MessageWriter<ToClients<ShotFx>>,
+) {
+    for shot in shots.read() {
+        if !hits.allows(shot.shooter, shot.weapon) {
+            continue;
         }
-        if any_hit {
-            hits.confirm(shooter, any_head, any_kill);
+        for effect in shoot(
+            &spatial,
+            &mut hits,
+            shot.shooter,
+            shot.weapon,
+            shot.origin,
+            &[shot.dir],
+        ) {
+            fx.write(ToClients {
+                targets: SendTargets::All,
+                message: effect,
+            });
         }
     }
 }
@@ -269,6 +387,9 @@ pub fn receive_melee(
         let Some(attacker) = find_player(*client_id, &hits.clients) else {
             continue;
         };
+        if !hits.allows(attacker, WeaponKind::Knife) {
+            continue;
+        }
         let Ok(dir) = Dir3::new(message.dir) else {
             continue;
         };

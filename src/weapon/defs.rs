@@ -1,4 +1,5 @@
-//! Weapon stats and spray patterns, plus the knife and the grenade.
+//! Weapon stats and spray patterns, plus the knife, the grenade and the
+//! flintlock's spark delay.
 //!
 //! Angles are in degrees. A spray pattern is where shot N lands relative to
 //! where you aimed, x to the right and y up, if you don't pull against it.
@@ -17,6 +18,7 @@ pub enum WeaponKind {
     Sniper,
     Knife,
     Grenade,
+    Flintlock,
 }
 
 /// What kind of thing a weapon is. Guns shoot bullets; the knife and the
@@ -30,7 +32,7 @@ pub enum Class {
 
 impl WeaponKind {
     /// How many weapons there are. Arrays indexed by weapon use this.
-    pub const COUNT: usize = 7;
+    pub const COUNT: usize = 8;
 
     pub const ALL: [WeaponKind; Self::COUNT] = [
         WeaponKind::Ak,
@@ -40,6 +42,7 @@ impl WeaponKind {
         WeaponKind::Sniper,
         WeaponKind::Knife,
         WeaponKind::Grenade,
+        WeaponKind::Flintlock,
     ];
 
     pub fn index(self) -> usize {
@@ -55,6 +58,7 @@ impl WeaponKind {
             "5" | "sniper" | "awp" | "bolt" => Some(Self::Sniper),
             "6" | "knife" => Some(Self::Knife),
             "7" | "grenade" | "nade" | "he" | "frag" => Some(Self::Grenade),
+            "8" | "flintlock" | "flint" | "musket" => Some(Self::Flintlock),
             _ => None,
         }
     }
@@ -69,6 +73,9 @@ pub struct WeaponDef {
     pub class: Class,
     /// Seconds between shots.
     pub interval: f32,
+    /// Seconds from the click to the shot: the flintlock's spark has to light
+    /// the powder first. The shot goes where you aim when it fires.
+    pub delay: f32,
     /// Hold to fire, or one shot per click.
     pub automatic: bool,
     /// Rounds per magazine. 0 means no ammo at all (the knife); the grenade
@@ -169,6 +176,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
         name: "AK",
         class: Class::Gun,
         interval: 0.1,
+        delay: 0.0,
         automatic: true,
         mag: 30,
         reload_secs: 2.3,
@@ -194,6 +202,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
         name: "MP5",
         class: Class::Gun,
         interval: 0.075,
+        delay: 0.0,
         automatic: true,
         mag: 30,
         reload_secs: 2.0,
@@ -219,6 +228,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
         name: "Glock",
         class: Class::Gun,
         interval: 0.13,
+        delay: 0.0,
         automatic: false,
         mag: 20,
         reload_secs: 1.6,
@@ -244,6 +254,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
         name: "Shotgun",
         class: Class::Gun,
         interval: 0.85,
+        delay: 0.0,
         automatic: false,
         mag: 8,
         reload_secs: 2.6,
@@ -269,6 +280,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
         name: "Sniper",
         class: Class::Gun,
         interval: 1.45,
+        delay: 0.0,
         automatic: false,
         mag: 5,
         reload_secs: 3.0,
@@ -294,6 +306,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
         name: "Knife",
         class: Class::Knife,
         interval: KNIFE.slash_secs,
+        delay: 0.0,
         automatic: false,
         mag: 0,
         reload_secs: 0.0,
@@ -319,6 +332,7 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
         name: "Grenade",
         class: Class::Grenade,
         interval: 0.6,
+        delay: 0.0,
         automatic: false,
         mag: 1,
         reload_secs: 0.0,
@@ -337,6 +351,32 @@ const DEFS: [WeaponDef; WeaponKind::COUNT] = [
         recover_secs: 0.3,
         pattern: &[],
         kick: 0.0,
+        zoom: &[],
+        scoped: 0.0,
+    },
+    WeaponDef {
+        name: "Flintlock",
+        class: Class::Gun,
+        interval: 0.5,
+        delay: 0.15,
+        automatic: false,
+        mag: 1,
+        reload_secs: 3.0,
+        draw_secs: 0.6,
+        damage: 90.0,
+        head_mult: 2.0,
+        falloff_per_10m: 0.9,
+        pellets: 1,
+        pellet_spread: 0.0,
+        stand: 0.35,
+        moving: 5.0,
+        airborne: 10.0,
+        crouch_mult: 0.8,
+        per_shot: 0.0,
+        per_shot_max: 0.0,
+        recover_secs: 1.0,
+        pattern: &[],
+        kick: 4.5,
         zoom: &[],
         scoped: 0.0,
     },
@@ -478,8 +518,12 @@ mod tests {
         assert_eq!(WeaponKind::parse("knife"), Some(WeaponKind::Knife));
         assert_eq!(WeaponKind::parse("7"), Some(WeaponKind::Grenade));
         assert_eq!(WeaponKind::parse("nade"), Some(WeaponKind::Grenade));
+        assert_eq!(WeaponKind::parse("8"), Some(WeaponKind::Flintlock));
+        assert_eq!(WeaponKind::parse("flintlock"), Some(WeaponKind::Flintlock));
         for kind in WeaponKind::ALL {
-            assert_eq!(kind.def().class == Class::Gun, kind.index() < 5);
+            let gun = kind.index() < 5 || kind == WeaponKind::Flintlock;
+            assert_eq!(kind.def().class == Class::Gun, gun);
+            assert_eq!(kind.def().delay > 0.0, kind == WeaponKind::Flintlock);
         }
     }
 }

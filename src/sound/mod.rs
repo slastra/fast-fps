@@ -34,6 +34,12 @@ pub struct Sounds {
     pub explode: Handle<AudioSource>,
     /// Pulling a grenade's pin.
     pub pin: Handle<AudioSource>,
+    /// The flintlock's spark lighting the pan, and its ramrod reload.
+    pub flint_pan: Handle<AudioSource>,
+    pub flint_reload: Handle<AudioSource>,
+    /// A duelist reaching their mark, and the bell for "Draw!".
+    pub duel_mark: Handle<AudioSource>,
+    pub duel_draw: Handle<AudioSource>,
 }
 
 pub fn play(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32) {
@@ -73,6 +79,7 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
             // The knife's swish, and the grenade leaving the hand.
             load(recorded!("knife")),
             load(recorded!("throw")),
+            load(recorded!("flintlock")),
         ],
         zoom: load(recorded!("zoom")),
         hit: load(recorded!("hit")),
@@ -84,6 +91,10 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
         bounce: load(recorded!("bounce")),
         explode: load(recorded!("explode")),
         pin: load(recorded!("pin")),
+        flint_pan: load(recorded!("flint_pan")),
+        flint_reload: load(recorded!("flint_reload")),
+        duel_mark: load(recorded!("duel_mark")),
+        duel_draw: load(recorded!("duel_draw")),
     });
 }
 
@@ -122,6 +133,10 @@ mod tests {
             ("bounce".into(), &sounds.bounce),
             ("explode".into(), &sounds.explode),
             ("pin".into(), &sounds.pin),
+            ("flint_pan".into(), &sounds.flint_pan),
+            ("flint_reload".into(), &sounds.flint_reload),
+            ("duel_mark".into(), &sounds.duel_mark),
+            ("duel_draw".into(), &sounds.duel_draw),
         ]);
         let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/sounds/all");
         std::fs::create_dir_all(&out).unwrap();

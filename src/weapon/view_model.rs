@@ -164,11 +164,12 @@ pub fn animate_gun(
         visibility.set_if_neq(want);
     }
     // Hide the gun while looking through the scope (or when asked to).
-    root.1.set_if_neq(if arsenal.scoped() || hidden.0 {
-        Visibility::Hidden
-    } else {
-        Visibility::Inherited
-    });
+    root.1
+        .set_if_neq(if arsenal.scoped() || hidden.0 || arsenal.out {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        });
 
     arsenal.kick = (arsenal.kick - dt * 3.5).max(0.0);
     let kick = arsenal.kick;

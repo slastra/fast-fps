@@ -24,6 +24,7 @@ src/
   physics.rs     Collision layers: who can touch whom.
   render.rs      The camera and its post-processing: bloom, shadows, anti-aliasing.
   sky.rs         The four times of day: sky dome, sun or moon, light, fog, exposure.
+  duel.rs        The duel as you see it: marks on the ground, banners, the bell.
   lowpoly.rs     The shape kit: beveled blocks, crates, barrels, rocks, pines, grass.
 
   console/       The drop-down console. The whole user interface.
@@ -43,14 +44,15 @@ src/
     combat.rs      A shot or knife swing arrives; decide what it hit and what that does.
     grenades.rs    Thrown grenades: their flight, fuse and blast.
     dummies.rs     Practice targets.
-    bots.rs        Practice bots and the `bot` commands.
+    bots.rs        Practice bots and the `bot` commands. Dueling bots fire back.
+    duel.rs        The duel game mode (`mode duel`): rounds, marks, who's in and out.
 
   player/        The character you control.
     mod.rs         Spawning it, reporting its position, respawning.
     input.rs       Key bindings and mouse capture.
     view.rs        The view rig, sensitivity, field of view.
 
-  weapon/        Guns, the knife and the grenade.
+  weapon/        Guns, the knife, the grenade and the flintlock.
     defs.rs        Stats and spray patterns. Tune or add weapons here.
     models.rs      What each weapon looks like.
     arsenal.rs     What you're holding, switching, the scope.
@@ -60,7 +62,7 @@ src/
     view_model.rs  The gun on your screen and in other players' hands.
     icons.rs       HUD icons, rendered from the gun models at startup.
     fx.rs          Tracers, sparks, bullet holes.
-    blast.rs       Grenades in flight and explosions, as everyone sees them.
+    blast.rs       Grenades in flight, explosions and gun smoke, as everyone sees them.
 
   avatar/        Other players' bodies.
     rig.rs         The skeleton: eleven bones and their boxes.
