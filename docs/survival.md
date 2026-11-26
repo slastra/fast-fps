@@ -77,6 +77,16 @@ Two ammo types loaded together make a combo:
 
 The line under the wave count shows your loaded ammo and combo.
 
+## Sounds
+
+All made with `scripts/sounds.py` like the rest of the game's sounds. Zombies groan now and
+then (a crawler drags itself instead), and a leaper screeches as it crouches to leap: that's
+the warning to listen for. A bloater bursting, fire catching, ice forming and shock arcing
+are heard where they happen, fading with distance. Everyone hears stone giving way where a
+crack opens, a war horn when a wave starts and a gong when it's cleared. You hear a blow land
+on you, your heartbeat when you go down, chimes when someone is healed, a card being taken,
+and an ammo box picked up.
+
 ## Console
 
 | Command | |
@@ -109,7 +119,7 @@ The mode is contained: the rest of the game knows nothing of zombies or cards.
 | | |
 |---|---|
 | `src/server/survival/` | The rules: `mod.rs` (the run, the mode switch, what cards do to weapons), `waves.rs` (phases and sizes, unit tested), `zombies.rs` (the kinds, spawning, walking, attacking), `kinds.rs` (the leaper's leap, the bloater's burst and gas), `status.rs` (burning, chill, frozen), `effects.rs` (ammo, combos, perks on a hit), `downed.rs`, `drops.rs`, `draft.rs` |
-| `src/survival/` | Shared and client: `cards.rs` (the card table and what a hand adds up to, unit tested), `cracks.rs` (which breaches the cracks are, the routes, the doors, opening breaches), `protocol.rs` (wire types), `looks.rs` (each kind's colors, parts and eyes), `hud.rs`, `scene.rs` (broken breaches, pickups, auras, flashes, gas), `mod.rs` (keys, limits, probe) |
+| `src/survival/` | Shared and client: `cards.rs` (the card table and what a hand adds up to, unit tested), `cracks.rs` (which breaches the cracks are, the routes, the doors, opening breaches), `protocol.rs` (wire types), `looks.rs` (each kind's colors, parts and eyes), `sounds.rs` (what plays when), `hud.rs`, `scene.rs` (broken breaches, pickups, auras, flashes, gas), `mod.rs` (keys, limits, probe) |
 | `src/config.rs` | `SURVIVAL_*`: wave size, breather lengths, drop rates, bleed-out, revive |
 
 It uses the core's general hooks, which any mode can: `Rules` (respawns, friendly fire,

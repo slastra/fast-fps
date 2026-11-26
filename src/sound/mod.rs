@@ -40,6 +40,37 @@ pub struct Sounds {
     /// A duelist reaching their mark, and the bell for "Draw!".
     pub duel_mark: Handle<AudioSource>,
     pub duel_draw: Handle<AudioSource>,
+    /// Survival (`survival/sounds.rs`).
+    pub survival: SurvivalSounds,
+}
+
+/// Survival's sounds: the zombies, the run, the player, the special ammo.
+pub struct SurvivalSounds {
+    pub groan: Handle<AudioSource>,
+    pub crawl: Handle<AudioSource>,
+    /// A leaper crouching to leap.
+    pub screech: Handle<AudioSource>,
+    /// A bloater bursting.
+    pub bloat: Handle<AudioSource>,
+    /// A zombie's blow landing on you.
+    pub claw: Handle<AudioSource>,
+    /// A crack breaking open, a wave starting, a wave cleared.
+    pub breach: Handle<AudioSource>,
+    pub horn: Handle<AudioSource>,
+    pub cleared: Handle<AudioSource>,
+    pub card: Handle<AudioSource>,
+    pub downed: Handle<AudioSource>,
+    pub revive: Handle<AudioSource>,
+    pub ammo: Handle<AudioSource>,
+    pub ignite: Handle<AudioSource>,
+    pub freeze: Handle<AudioSource>,
+    pub zap: Handle<AudioSource>,
+}
+
+/// How loud a sound at `distance` meters is: `volume` up close, fading to
+/// nothing at `range`.
+pub fn faded(volume: f32, distance: f32, range: f32) -> f32 {
+    (1.0 - distance / range).clamp(0.0, 1.0) * volume
 }
 
 pub fn play(commands: &mut Commands, sound: &Handle<AudioSource>, volume: f32) {
@@ -95,6 +126,23 @@ fn make_sounds(mut commands: Commands, mut sources: ResMut<Assets<AudioSource>>)
         flint_reload: load(recorded!("flint_reload")),
         duel_mark: load(recorded!("duel_mark")),
         duel_draw: load(recorded!("duel_draw")),
+        survival: SurvivalSounds {
+            groan: load(recorded!("groan")),
+            crawl: load(recorded!("crawl")),
+            screech: load(recorded!("screech")),
+            bloat: load(recorded!("bloat")),
+            claw: load(recorded!("claw")),
+            breach: load(recorded!("breach")),
+            horn: load(recorded!("horn")),
+            cleared: load(recorded!("cleared")),
+            card: load(recorded!("card")),
+            downed: load(recorded!("downed")),
+            revive: load(recorded!("revive")),
+            ammo: load(recorded!("ammo")),
+            ignite: load(recorded!("ignite")),
+            freeze: load(recorded!("freeze")),
+            zap: load(recorded!("zap")),
+        },
     });
 }
 
@@ -137,6 +185,24 @@ mod tests {
             ("flint_reload".into(), &sounds.flint_reload),
             ("duel_mark".into(), &sounds.duel_mark),
             ("duel_draw".into(), &sounds.duel_draw),
+        ]);
+        let s = &sounds.survival;
+        named.extend([
+            ("groan".into(), &s.groan),
+            ("crawl".into(), &s.crawl),
+            ("screech".into(), &s.screech),
+            ("bloat".into(), &s.bloat),
+            ("claw".into(), &s.claw),
+            ("breach".into(), &s.breach),
+            ("horn".into(), &s.horn),
+            ("cleared".into(), &s.cleared),
+            ("card".into(), &s.card),
+            ("downed".into(), &s.downed),
+            ("revive".into(), &s.revive),
+            ("ammo".into(), &s.ammo),
+            ("ignite".into(), &s.ignite),
+            ("freeze".into(), &s.freeze),
+            ("zap".into(), &s.zap),
         ]);
         let out = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/sounds/all");
         std::fs::create_dir_all(&out).unwrap();

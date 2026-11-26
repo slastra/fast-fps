@@ -35,6 +35,7 @@ src/
     cards.rs       The card table, and what a hand of cards adds up to.
     cracks.rs      The cracks (opened breaches in the wall), routes to the keep, its doors.
     looks.rs       Each kind of zombie: colors, extra or missing parts, dot eyes.
+    sounds.rs      Groans, the leaper's screech, the horn and gong, breaking stone, and more.
     protocol.rs    Survival's wire types.
     hud.rs         The wave line, the cards, being down, the revive prompt.
     scene.rs       Broken breaches, pickups, burning and frozen zombies, arcs, bursts, gas.

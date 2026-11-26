@@ -179,7 +179,102 @@ SOUNDS = {
         2.5,
         False,
     ),
+    # Survival: zombies.
+    "groan": (
+        "A zombie's low, rasping, guttural groan, slow and hungry, a horror game creature "
+        "sound. One groan, about one and a half seconds.",
+        1.8,
+        False,
+    ),
+    "crawl": (
+        "A creature dragging itself across dirt and gravel on its hands: a rough scrape "
+        "and a wet, rasping breath. About one second.",
+        1.3,
+        False,
+    ),
+    "screech": (
+        "A feral creature's sharp, hissing shriek as it crouches to pounce, rising "
+        "quickly. Startling, under one second.",
+        0.9,
+        False,
+    ),
+    "bloat": (
+        "A swollen body bursting: a wet, heavy pop and splatter, then a hiss of foul gas "
+        "escaping. About one and a half seconds.",
+        1.8,
+        False,
+    ),
+    "claw": (
+        "Claws raking across a body: a quick, harsh tearing swipe with a dull impact. "
+        "Very short.",
+        0.5,
+        True,
+    ),
+    # Survival: the run.
+    "breach": (
+        "A section of an old stone castle wall cracking and caving in: a deep crunch, "
+        "stones tumbling and rubble settling. About two seconds.",
+        2.4,
+        False,
+    ),
+    "horn": (
+        "A distant war horn blowing one long, low, ominous note across an open field, "
+        "with a faint echo. About two and a half seconds.",
+        2.8,
+        False,
+    ),
+    "cleared": (
+        "A short low drum roll ending in one soft, resonant gong hit, calm and relieved. "
+        "About two seconds.",
+        2.4,
+        False,
+    ),
+    # Survival: players.
+    "card": (
+        "A playing card flicked out and snapped down on a wooden table: one crisp paper "
+        "snap. Very short.",
+        0.4,
+        True,
+    ),
+    "downed": (
+        "A slow, heavy heartbeat: two muffled low thumps, as heard by someone badly hurt.",
+        1.3,
+        False,
+    ),
+    "revive": (
+        "A short rising shimmer of soft, bright chimes, hopeful, like being healed in a "
+        "video game. About one second.",
+        1.2,
+        False,
+    ),
+    "ammo": (
+        "Picking up a box of ammunition: a quick rattle of cartridges and a solid metal "
+        "clack. Very short.",
+        0.6,
+        True,
+    ),
+    # Survival: special ammo.
+    "ignite": (
+        "Flame catching on something: a quick fiery whoosh and crackle. Under one second.",
+        0.8,
+        True,
+    ),
+    "freeze": (
+        "Ice forming instantly: a sharp crystalline crackle and crunch, cold and brittle. "
+        "Under one second.",
+        0.8,
+        True,
+    ),
+    "zap": (
+        "A short electric arc: a crackling zap of electricity jumping between two points. "
+        "Very short.",
+        0.5,
+        True,
+    ),
 }
+
+# Creature sounds are made from a voice; don't tell the model there's none.
+VOICED = {"groan", "crawl", "screech"}
 
 RATE = 44100
 # Quieter than this counts as silence when trimming.
@@ -191,7 +286,7 @@ def gen(name: str, count: int) -> None:
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
         sys.exit("OPENROUTER_API_KEY is not set")
-    prompt = SOUNDS[name][0] + NO_VOICES
+    prompt = SOUNDS[name][0] + (" Sound effect only, no words, no music." if name in VOICED else NO_VOICES)
     TAKES.mkdir(parents=True, exist_ok=True)
     for _ in range(count):
         n = 1

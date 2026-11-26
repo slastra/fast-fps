@@ -15,6 +15,7 @@ mod hud;
 mod looks;
 pub mod protocol;
 pub mod scene;
+mod sounds;
 
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
@@ -43,6 +44,7 @@ pub(super) fn plugin(app: &mut App) {
     hud::plugin(app);
     looks::plugin(app);
     scene::plugin(app);
+    sounds::plugin(app);
     cracks::add_breaches(app);
     app.console_command(
         "pick",
