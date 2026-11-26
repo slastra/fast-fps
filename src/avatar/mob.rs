@@ -6,7 +6,7 @@
 use bevy::{platform::collections::HashMap, prelude::*};
 
 use super::{
-    anim::AvatarAnim,
+    anim::{AvatarAnim, Gait},
     rig::{self, Look, Shared},
 };
 use crate::net::Mob;
@@ -17,19 +17,30 @@ pub(super) fn plugin(app: &mut App) {
         .add_observer(dress_mob);
 }
 
-/// How mobs of one kind look.
+/// How mobs of one kind look, and carry themselves.
 #[derive(Clone, Copy, Debug)]
 pub struct MobLook {
     pub look: Look,
     /// Carry a gun (the held weapon's model), or go empty-handed.
     pub gun: bool,
+    pub gait: Gait,
 }
 
 #[derive(Resource, Default)]
 pub struct MobLooks(HashMap<u8, MobLook>);
 
+/// What mobs of each kind share, built with the first of them.
 #[derive(Resource, Default)]
-struct SharedRigs(HashMap<u8, Shared>);
+pub struct SharedRigs(HashMap<u8, Shared>);
+
+impl SharedRigs {
+    /// The glowing material (eyes, and anything else that glows) every mob
+    /// of `kind` shares, once one has been drawn. Change it to change them
+    /// all.
+    pub fn glow(&self, kind: u8) -> Option<&Handle<StandardMaterial>> {
+        self.0.get(&kind).and_then(Shared::glow)
+    }
+}
 
 pub trait MobLookAppExt {
     /// Draw mobs of `kind` like this.
@@ -62,6 +73,7 @@ fn dress_mob(
     let look = looks.0.get(&mob.kind).copied().unwrap_or(MobLook {
         look: Look::new(grey, grey.darker(0.14), Color::WHITE),
         gun: false,
+        gait: Gait::default(),
     });
     let rig = rig::spawn_with(
         &mut commands,
@@ -73,7 +85,12 @@ fn dress_mob(
         &mut materials,
         Some(shared.0.entry(mob.kind).or_default()),
     );
-    commands
-        .entity(add.entity)
-        .insert((rig, AvatarAnim::default()));
+    // Each mob favors its own side and is at its own point in its stride, so
+    // a crowd doesn't move in step.
+    let seed = add.entity.index().index().wrapping_mul(2_654_435_761);
+    let mut anim = AvatarAnim::default();
+    anim.gait = look.gait;
+    anim.side = if seed & 1 == 0 { 1.0 } else { -1.0 };
+    anim.phase = (seed >> 8) as f32 / (1u32 << 24) as f32;
+    commands.entity(add.entity).insert((rig, anim));
 }

@@ -216,7 +216,9 @@ Movement is his [bevy_ahoy](https://github.com/janhohenheim/bevy_ahoy), physics 
 [Avian](https://github.com/Jondolf/avian), and networking is
 [bevy_replicon](https://github.com/simgine/bevy_replicon) over renet. The HUD typeface is
 [Martian Grotesk](https://github.com/evilmartians/grotesk) by Evil Martians, under the SIL
-Open Font License (see `assets/fonts/OFL.txt`). Project structure started from
+Open Font License (see `assets/fonts/OFL.txt`); survival's cards use
+[Cinzel](https://github.com/NDISCOVER/Cinzel) by Natanael Gama, under the same license
+(`assets/fonts/OFL-Cinzel.txt`). Project structure started from
 [bevy_new_2d](https://github.com/TheBevyFlock/bevy_new_2d).
 
 ## License

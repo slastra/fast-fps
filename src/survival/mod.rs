@@ -9,8 +9,10 @@
 //! - [`hud`]: the wave line, the cards, being down, reviving.
 //! - [`scene`]: cracks, pickups, what's happening to zombies, flashes.
 
+mod art;
 pub mod cards;
 pub mod cracks;
+mod draft_ui;
 mod hud;
 mod looks;
 pub mod protocol;
@@ -42,6 +44,8 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(Update, probe);
     hud::plugin(app);
+    art::plugin(app);
+    draft_ui::plugin(app);
     looks::plugin(app);
     scene::plugin(app);
     sounds::plugin(app);
@@ -160,6 +164,8 @@ fn picks(
     keys: Res<ButtonInput<KeyCode>>,
     mut cmds: MessageReader<ConsoleCommand>,
     me: Res<Me>,
+    time: Res<Time>,
+    mut taken: ResMut<draft_ui::Taken>,
     mut send: MessageWriter<PickCard>,
     mut print: MessageWriter<Print>,
 ) {
@@ -189,6 +195,7 @@ fn picks(
         let id = me.offer[n as usize];
         print.write(Print(format!("took {}", CARDS[id as usize].name)));
         send.write(PickCard(n));
+        taken.0 = Some((n as usize, time.elapsed_secs()));
     }
 }
 

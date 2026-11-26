@@ -6,7 +6,7 @@ use bevy::prelude::*;
 use crate::{
     hud::{ACCENT, CrossBar, CrosshairRoot, DANGER, ReloadFill, ReloadTrack, ScopeOverlay, TEXT},
     render::WorldCamera,
-    weapon::{Arsenal, GRENADE, HitMarker},
+    weapon::{Arsenal, GRENADE, HitMarker, MenuKeys},
 };
 
 /// The gap is the inaccuracy cone projected onto the screen: a bullet will
@@ -15,6 +15,7 @@ pub fn crosshair(
     time: Res<Time>,
     mut marker: ResMut<HitMarker>,
     arsenal: Res<Arsenal>,
+    menu: Res<MenuKeys>,
     window: Single<&Window>,
     scale: Res<UiScale>,
     camera: Single<&Projection, With<WorldCamera>>,
@@ -23,7 +24,8 @@ pub fn crosshair(
 ) {
     marker.time = (marker.time - time.delta_secs()).max(0.0);
     let (visibility, root_node) = &mut *root;
-    visibility.set_if_neq(if arsenal.scoped() || arsenal.holstered() {
+    // Hidden while scoped, holstered, or a menu is up (it'd sit on it).
+    visibility.set_if_neq(if arsenal.scoped() || arsenal.holstered() || menu.0 {
         Visibility::Hidden
     } else {
         Visibility::Inherited

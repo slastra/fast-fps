@@ -50,6 +50,12 @@ pub struct AvatarAnim {
     pub swing: f32,
     /// 1 flat on the ground, pulling along with the arms (a crawling mob).
     pub crawl: f32,
+    /// How a mob moves, fixed for its life ([`Gait`]), and which side it
+    /// favors (1 or -1).
+    pub gait: Gait,
+    pub side: f32,
+    /// A head snapped back by a headshot, easing to 0.
+    pub snap: f32,
     /// Aim pitch in radians, positive up.
     pub pitch: f32,
     /// 1 right after a shot, decaying to 0.
@@ -81,6 +87,9 @@ impl Default for AvatarAnim {
             reach: 0.0,
             swing: 0.0,
             crawl: 0.0,
+            gait: Gait::default(),
+            side: 1.0,
+            snap: 0.0,
             pitch: 0.0,
             recoil: 0.0,
             flinch: Vec2::ZERO,
@@ -93,6 +102,17 @@ impl Default for AvatarAnim {
             was_air: false,
         }
     }
+}
+
+/// How a mob carries itself. All 0 is a player.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Gait {
+    /// A limp, a list to one side, a lolling head and one arm hanging low.
+    pub shamble: f32,
+    /// Leaning forward, radians.
+    pub lean: f32,
+    /// A heavy, bouncing stride.
+    pub stomp: f32,
 }
 
 fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
@@ -145,6 +165,7 @@ pub fn advance(
         a.was_air = in_air;
         a.land.smooth_nudge(&0.0, 7.0, dt);
         a.recoil.smooth_nudge(&0.0, 14.0, dt);
+        a.snap.smooth_nudge(&0.0, 6.0, dt);
 
         let accel = -150.0 * a.flinch - 15.0 * a.flinch_vel;
         a.flinch_vel += accel * dt;
@@ -255,7 +276,11 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
 
     // --- Hips ------------------------------------------------------------
     // Lowest when the feet are furthest apart, twice per cycle.
-    let bob = -(0.012 + 0.03 * gait) * moving * (2.0 * cycle).cos();
+    let g = a.gait;
+    let bob = -(0.012 + 0.03 * gait) * moving * (2.0 * cycle).cos() * (1.0 + 1.5 * g.stomp)
+        // A limp dips on the bad leg; a stomp lands hard on each.
+        - 0.04 * g.shamble * moving * (cycle * a.side).sin().max(0.0)
+        - 0.03 * g.stomp * moving * (2.0 * cycle).cos().abs();
     let upright = Vec3::new(
         0.0,
         Bone::Hips.offset().y - CROUCH_DROP * a.crouch - 0.04 * gait * ground + bob - 0.14 * a.land
@@ -276,7 +301,7 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
     let twist = 0.1 * moving * cycle.cos() * dir.z;
     let hips_rot = Quat::from_rotation_y(twist * (1.0 + crawl))
         * Quat::from_rotation_x(-0.1 * forward * ground - 1.42 * crawl)
-        * Quat::from_rotation_z(-0.08 * sideways * ground);
+        * Quat::from_rotation_z(-0.08 * sideways * ground + 0.07 * g.shamble * a.side);
     bones[Bone::Hips.index()] = Transform {
         translation: hips_pos,
         rotation: hips_rot,
@@ -298,7 +323,13 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
             side * 0.06 * (1.0 - moving),
         );
         // Stance half of the cycle slides the foot back; swing lifts it forward.
-        let planted = rest + dir * (stride * cos) + Vec3::Y * (lift * (-sin).max(0.0));
+        // The bad leg takes a shorter step.
+        let short = if side == a.side {
+            1.0 - 0.45 * g.shamble
+        } else {
+            1.0
+        };
+        let planted = rest + dir * (stride * short * cos) + Vec3::Y * (lift * (-sin).max(0.0));
         let airborne = Vec3::new(
             side * 0.12,
             FEET_Y + tuck + if side > 0.0 { 0.1 } else { 0.0 },
@@ -315,17 +346,19 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
     // --- Torso and head --------------------------------------------------
     // Lean into the crouch, follow part of the aim pitch, and cancel the hip
     // twist so the shoulders stay square to the target.
-    let torso_local =
-        Quat::from_rotation_x(-0.3 * a.crouch - 0.45 * a.down + 0.3 * a.pitch + a.flinch.x)
-            * Quat::from_rotation_z(a.flinch.y)
-            * Quat::from_rotation_y(-hold.blade - twist);
+    let torso_local = Quat::from_rotation_x(
+        -0.3 * a.crouch - 0.45 * a.down + 0.3 * a.pitch + a.flinch.x - g.lean,
+    ) * Quat::from_rotation_z(a.flinch.y + 0.08 * g.shamble * a.side)
+        * Quat::from_rotation_y(-hold.blade - twist);
     let torso_rot = hips_rot * torso_local;
     let torso_pos = hips_pos + hips_rot * Bone::Torso.offset();
     bones[Bone::Torso.index()].rotation = torso_local;
 
     let aim = Quat::from_rotation_x(a.pitch);
-    let head_rot =
-        aim * Quat::from_rotation_x(0.7 * a.flinch.x) * Quat::from_rotation_z(0.7 * a.flinch.y);
+    let loll = g.shamble * (0.3 * a.side + 0.12 * (a.time * 1.3).sin());
+    let head_rot = aim
+        * Quat::from_rotation_x(0.7 * a.flinch.x - 0.25 * g.shamble + 0.7 * a.snap)
+        * Quat::from_rotation_z(0.7 * a.flinch.y + loll);
     bones[Bone::Head.index()].rotation = torso_rot.inverse() * head_rot;
 
     // --- Gun and arms ----------------------------------------------------
@@ -366,10 +399,20 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
     let reach = smoothstep(0.0, 1.0, a.reach);
     let (left_hand, right_hand) = if reach > 0.0 {
         let out = |side: f32, arm: Bone| {
+            // A shambler's arm on its bad side hangs lower and less forward.
+            let droop = if side == a.side {
+                g.shamble * (1.0 - a.swing)
+            } else {
+                0.0
+            };
             torso_pos
                 + torso_rot
                     * (arm.offset()
-                        + Vec3::new(side * 0.04, -0.06 + 0.32 * a.swing, -0.56 + 0.12 * a.swing))
+                        + Vec3::new(
+                            side * 0.04,
+                            -0.06 + 0.32 * a.swing - 0.34 * droop,
+                            -0.56 + 0.12 * a.swing + 0.24 * droop,
+                        ))
         };
         (
             left_hand.lerp(out(-1.0, Bone::UpperArmL), reach),
@@ -515,6 +558,13 @@ mod tests {
                 swing: if a.phase > 0.3 { 1.0 } else { 0.0 },
                 down: if a.crouch > 0.5 { 1.0 } else { 0.0 },
                 crawl: if a.pitch == 0.0 { 1.0 } else { 0.0 },
+                gait: Gait {
+                    shamble: if a.phase < 0.4 { 1.0 } else { 0.0 },
+                    lean: 0.35 * a.recoil,
+                    stomp: if a.phase > 0.6 { 1.0 } else { 0.0 },
+                },
+                side: if a.crouch > 0.5 { -1.0 } else { 1.0 },
+                snap: if a.phase > 0.7 { 1.0 } else { 0.0 },
                 weapon: a.weapon,
                 vel: a.vel,
                 pitch: a.pitch,

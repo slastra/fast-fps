@@ -37,7 +37,9 @@ src/
     looks.rs       Each kind of zombie: colors, extra or missing parts, dot eyes.
     sounds.rs      Groans, the leaper's screech, the horn and gong, breaking stone, and more.
     protocol.rs    Survival's wire types.
-    hud.rs         The wave line, the cards, being down, the revive prompt.
+    hud.rs         The wave line, call-outs, being down, the revive prompt.
+    draft_ui.rs    The cards, in the Relic style.
+    art.rs         Card pictures drawn in code: ammo rounds, an ammo box, a medkit.
     scene.rs       Broken breaches, pickups, burning and frozen zombies, arcs, bursts, gas.
     mod.rs         Card keys, revive key, movement limits while down, probe values.
   lowpoly.rs     The shape kit: beveled blocks, crates, barrels, rocks, pines, grass.

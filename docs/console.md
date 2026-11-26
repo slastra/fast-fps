@@ -53,6 +53,7 @@ commands run at startup.
 | `zombie [walker\|runner\|brute\|crawler\|bloater\|leaper] [x z]` | A zombie now, 6 m in front of you or at x z, going for the nearest player. |
 | `next_wave` | End the breather now. |
 | `end_wave` | Clear the wave's zombies now. |
+| `offer <card>, <card>[, <card>]` | Offer these cards now, to try them out. |
 
 [survival.md](survival.md) lists the cards and the probe values survival publishes.
 

@@ -4,20 +4,15 @@
 
 use bevy::prelude::*;
 
-use super::{
-    Me,
-    cards::{CARDS, Rarity},
-    protocol::Phase,
-};
-use crate::hud::{ACCENT, DANGER, DIM, HudFont, PANEL, TEXT, text};
+use super::{Me, protocol::Phase};
+use crate::hud::{DANGER, HudFont, TEXT, text};
 
 /// How long "Wave 4" stays up when a wave begins.
 const CALL_SECS: f32 = 2.2;
-const RARE: Color = Color::srgb(0.45, 0.7, 1.0);
 
 pub(super) fn plugin(app: &mut App) {
     app.add_systems(Startup, spawn)
-        .add_systems(Update, (top_line, call_out, cards, downed, helping));
+        .add_systems(Update, (top_line, call_out, downed, helping));
 }
 
 #[derive(Component)]
@@ -26,16 +21,6 @@ struct WaveLine;
 struct BuildLine;
 #[derive(Component)]
 struct CallOut;
-#[derive(Component)]
-struct CardRow;
-#[derive(Component)]
-struct CardPanel(usize);
-#[derive(Component)]
-enum CardText {
-    Name(usize),
-    Rarity(usize),
-    Body(usize),
-}
 #[derive(Component)]
 struct DownVeil;
 #[derive(Component)]
@@ -85,50 +70,6 @@ fn spawn(mut commands: Commands, font: Res<HudFont>) {
         c.spawn((DownText, text(font, "", 18.0, 600, TEXT)));
         c.spawn((HelpText, text(font, "", 15.0, 600, TEXT)));
     });
-
-    // The draft: three cards side by side.
-    commands
-        .spawn((
-            CardRow,
-            Node {
-                position_type: PositionType::Absolute,
-                width: percent(100),
-                top: percent(38),
-                justify_content: JustifyContent::Center,
-                column_gap: px(14),
-                ..default()
-            },
-            Visibility::Hidden,
-            Pickable::IGNORE,
-        ))
-        .with_children(|row| {
-            for i in 0..3 {
-                row.spawn((
-                    CardPanel(i),
-                    Node {
-                        width: px(190),
-                        min_height: px(118),
-                        flex_direction: FlexDirection::Column,
-                        row_gap: px(6),
-                        padding: UiRect::all(px(12)),
-                        border: UiRect::top(px(3)),
-                        border_radius: BorderRadius::all(px(6)),
-                        ..default()
-                    },
-                    BackgroundColor(PANEL),
-                    BorderColor::all(TEXT),
-                ))
-                .with_children(|card| {
-                    card.spawn(text(font, &format!("{}", i + 1), 11.0, 700, ACCENT));
-                    card.spawn((CardText::Name(i), text(font, "", 16.0, 700, TEXT)));
-                    card.spawn((CardText::Rarity(i), text(font, "", 10.0, 600, TEXT)));
-                    card.spawn((
-                        CardText::Body(i),
-                        text(font, "", 12.0, 500, TEXT.with_alpha(0.85)),
-                    ));
-                });
-            }
-        });
 }
 
 fn set(text: &mut Text, to: String) {
@@ -210,61 +151,6 @@ fn call_out(
     };
     set(call_text, line);
     color.set_if_neq(TextColor(tint));
-}
-
-#[allow(clippy::type_complexity)]
-fn cards(
-    me: Res<Me>,
-    mut row: Single<&mut Visibility, With<CardRow>>,
-    mut panels: Query<(&CardPanel, &mut BorderColor, &mut Node)>,
-    mut texts: Query<(&CardText, &mut Text, &mut TextColor)>,
-) {
-    if !me.is_changed() {
-        return;
-    }
-    let show = me.run.as_ref().is_some_and(|r| r.phase == Phase::Breather) && !me.offer.is_empty();
-    row.set_if_neq(if show {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    });
-    if !show {
-        return;
-    }
-    let color = |r: Rarity| match r {
-        Rarity::Common => TEXT.with_alpha(DIM + 0.2),
-        Rarity::Rare => RARE,
-        Rarity::Legendary => ACCENT,
-    };
-    for (panel, mut border, mut node) in &mut panels {
-        let card = me.offer.get(panel.0).map(|&id| &CARDS[id as usize]);
-        node.display = if card.is_some() {
-            Display::Flex
-        } else {
-            Display::None
-        };
-        if let Some(card) = card {
-            *border = BorderColor::all(color(card.rarity));
-        }
-    }
-    for (which, mut text, mut tint) in &mut texts {
-        let (i, what) = match which {
-            CardText::Name(i) => (*i, 0),
-            CardText::Rarity(i) => (*i, 1),
-            CardText::Body(i) => (*i, 2),
-        };
-        let Some(card) = me.offer.get(i).map(|&id| &CARDS[id as usize]) else {
-            continue;
-        };
-        match what {
-            0 => set(&mut text, card.name.into()),
-            1 => {
-                set(&mut text, format!("{:?}", card.rarity).to_uppercase());
-                tint.set_if_neq(TextColor(color(card.rarity)));
-            }
-            _ => set(&mut text, card.text.into()),
-        }
-    }
 }
 
 #[allow(clippy::type_complexity)]

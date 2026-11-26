@@ -54,6 +54,8 @@ pub enum Paint {
     Glow,
     /// Bone and claw.
     Pale,
+    /// Dull iron.
+    Metal,
 }
 
 pub struct BoxDef {
@@ -312,6 +314,13 @@ pub struct Shared {
     materials: Option<(Handle<StandardMaterial>, Handle<StandardMaterial>)>,
 }
 
+impl Shared {
+    /// The glowing material (eyes, boils) bodies of this kind share.
+    pub fn glow(&self) -> Option<&Handle<StandardMaterial>> {
+        self.materials.as_ref().map(|m| &m.1)
+    }
+}
+
 /// Build a player's joint hierarchy and boxes under `player`, in their
 /// color, carrying every gun.
 pub fn spawn(
@@ -416,6 +425,7 @@ pub fn spawn_with(
                     Paint::Dark => Color::srgb(0.09, 0.09, 0.11),
                     Paint::Boot | Paint::Glow => Color::srgb(0.04, 0.04, 0.05),
                     Paint::Pale => Color::srgb(0.81, 0.78, 0.69),
+                    Paint::Metal => Color::srgb(0.26, 0.27, 0.3),
                 };
                 let mesh = reuse
                     .unwrap_or_else(|| meshes.add(lowpoly::block(size, color, 0.08, &mut rng)));

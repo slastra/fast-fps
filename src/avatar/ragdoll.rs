@@ -16,13 +16,15 @@ use rand::Rng;
 
 use super::rig::{AvatarRig, BONE_COUNT, JointKind, SKELETON};
 use crate::{
-    config::{MAX_RAGDOLLS, RAGDOLL_SECS},
+    config::{MAX_BODIES, MAX_RAGDOLLS, RAGDOLL_SECS, RAGDOLL_SETTLE_SECS},
     physics::Layer,
     render::no_shadow,
     weapon::{self, WeaponKind},
 };
 
-const FADE_SECS: f32 = 0.6;
+/// How long a corpse takes to sink into the ground, and how far it goes.
+const SINK_SECS: f32 = 2.5;
+const SINK_DEPTH: f32 = 0.8;
 
 /// Live ragdolls, oldest first.
 #[derive(Resource, Default)]
@@ -33,7 +35,8 @@ pub struct Ragdoll {
     bodies: Vec<Entity>,
     joints: Vec<Entity>,
     age: f32,
-    fading: bool,
+    /// Out of the simulation, lying still.
+    settled: bool,
 }
 
 pub struct Death {
@@ -206,7 +209,7 @@ pub fn spawn(
             bodies: parts,
             joints,
             age: 0.0,
-            fading: false,
+            settled: false,
         })
         .id();
     list.0.push_back(ragdoll);
@@ -220,33 +223,39 @@ pub fn age(
     mut ragdolls: Query<(Entity, &mut Ragdoll)>,
     mut transforms: Query<&mut Transform>,
 ) {
-    while list.0.len() > MAX_RAGDOLLS {
+    // Too many falling at once: the oldest come to rest now.
+    let falling: Vec<Entity> = list
+        .0
+        .iter()
+        .copied()
+        .filter(|e| ragdolls.get(*e).is_ok_and(|(_, r)| !r.settled))
+        .collect();
+    for &entity in falling
+        .iter()
+        .take(falling.len().saturating_sub(MAX_RAGDOLLS))
+    {
+        if let Ok((_, mut ragdoll)) = ragdolls.get_mut(entity) {
+            settle(&mut commands, &mut ragdoll);
+        }
+    }
+    // Too many lying around: the oldest sink now.
+    while list.0.len() > MAX_BODIES {
         if let Some(oldest) = list.0.pop_front()
             && let Ok((_, mut ragdoll)) = ragdolls.get_mut(oldest)
         {
             ragdoll.age = ragdoll.age.max(RAGDOLL_SECS);
         }
     }
+    let dt = time.delta_secs();
     for (entity, mut ragdoll) in &mut ragdolls {
-        ragdoll.age += time.delta_secs();
+        ragdoll.age += dt;
+        if ragdoll.age >= RAGDOLL_SETTLE_SECS && !ragdoll.settled {
+            settle(&mut commands, &mut ragdoll);
+        }
         if ragdoll.age < RAGDOLL_SECS {
             continue;
         }
-        // Take the corpse out of the simulation before shrinking it: scaling
-        // jointed bodies makes the solver blow up.
-        if !ragdoll.fading {
-            ragdoll.fading = true;
-            for joint in ragdoll.joints.drain(..) {
-                commands.entity(joint).try_despawn();
-            }
-            for body in &ragdoll.bodies {
-                commands
-                    .entity(*body)
-                    .try_remove::<(RigidBody, Collider, TransformInterpolation)>();
-            }
-        }
-        let scale = 1.0 - (ragdoll.age - RAGDOLL_SECS) / FADE_SECS;
-        if scale <= 0.02 {
+        if ragdoll.age >= RAGDOLL_SECS + SINK_SECS {
             for body in &ragdoll.bodies {
                 commands.entity(*body).try_despawn();
             }
@@ -254,10 +263,28 @@ pub fn age(
             list.0.retain(|e| *e != entity);
             continue;
         }
+        // Sink into the ground.
         for body in &ragdoll.bodies {
             if let Ok(mut transform) = transforms.get_mut(*body) {
-                transform.scale = Vec3::splat(scale);
+                transform.translation.y -= SINK_DEPTH / SINK_SECS * dt;
             }
         }
+    }
+}
+
+/// Take a corpse out of the simulation, where it lies. (Moving or scaling
+/// jointed bodies makes the solver blow up, so this comes first.)
+fn settle(commands: &mut Commands, ragdoll: &mut Ragdoll) {
+    if ragdoll.settled {
+        return;
+    }
+    ragdoll.settled = true;
+    for joint in ragdoll.joints.drain(..) {
+        commands.entity(joint).try_despawn();
+    }
+    for body in &ragdoll.bodies {
+        commands
+            .entity(*body)
+            .try_remove::<(RigidBody, Collider, TransformInterpolation)>();
     }
 }

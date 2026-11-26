@@ -14,7 +14,9 @@ use crate::{
     net::{Health, Kit, Player, Pose, WeaponMods},
     survival::{
         cards::{Build, CARDS, Effect, find},
-        protocol::{BLOATER, BRUTE, CRAWLER, LEAPER, Phase, RUNNER, Survival, Upgrades, WALKER},
+        protocol::{
+            BLOATER, BRUTE, CRAWLER, LEAPER, Offer, Phase, RUNNER, Survival, Upgrades, WALKER,
+        },
     },
 };
 
@@ -30,6 +32,11 @@ pub(super) fn plugin(app: &mut App) {
         "survival: a zombie now, going for the nearest player (host)",
     )
     .console_command("next_wave", "", "survival: end the breather now (host)")
+    .console_command(
+        "offer",
+        "<card>, <card>[, <card>]",
+        "survival: offer these cards now (host)",
+    )
     .console_command(
         "end_wave",
         "",
@@ -85,12 +92,28 @@ pub fn test_commands(
     mut runs: Query<(&Survival, &mut RunClock)>,
     hosts: Query<(&Player, &Pose)>,
     zombies: Query<Entity, With<Zombie>>,
+    mut offers: Query<(&Player, &mut Offer)>,
     mut spawner: ResMut<Spawner>,
     mut print: MessageWriter<Print>,
     mut commands: Commands,
 ) {
     for cmd in cmds.read() {
         match cmd.name.as_str() {
+            "offer" => {
+                let names = cmd.args.join(" ");
+                let ids: Option<Vec<u8>> = names.split(',').map(|n| find(n.trim())).collect();
+                match (ids, offers.iter_mut().find(|o| o.0.owner == 0)) {
+                    (Some(ids), Some((_, mut offer))) if !ids.is_empty() && ids.len() <= 3 => {
+                        offer.0 = ids;
+                    }
+                    (None, _) => {
+                        print.write(Print::error(format!("no such card in '{names}'")));
+                    }
+                    _ => {
+                        print.write(Print::error("offer one to three cards, on the host"));
+                    }
+                }
+            }
             "end_wave" => {
                 spawner.queue.clear();
                 for entity in &zombies {

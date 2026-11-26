@@ -90,18 +90,22 @@ fn shots(mut shots: MessageReader<ShotFx>, mut avatars: Query<(&Player, &mut Ava
 /// Flinch when hit; on a kill, leave a ragdoll and hide until respawned.
 fn damaged(
     mut hits: MessageReader<Damaged>,
-    mut avatars: Query<(&AvatarRig, &mut AvatarAnim, Option<&Loadout>)>,
+    mut avatars: Query<(&AvatarRig, &mut AvatarAnim, Option<&Loadout>, Has<Mob>)>,
     mut commands: Commands,
     mut ragdolls: ResMut<ragdoll::Ragdolls>,
     mut meshes: ResMut<Assets<Mesh>>,
 ) {
     for hit in hits.read() {
-        let Ok((rig, mut anim, loadout)) = avatars.get_mut(hit.target) else {
+        let Ok((rig, mut anim, loadout, mob)) = avatars.get_mut(hit.target) else {
             continue;
         };
-        // A shot from the front rocks the upper body back, and so on.
+        // A shot from the front rocks the upper body back, and so on. Mobs
+        // rock harder, and a headshot snaps their head back, so hits show.
         let local = Quat::from_rotation_y(-hit.yaw) * hit.dir;
-        anim.flinch_vel += Vec2::new(local.z, -local.x) * 4.0;
+        anim.flinch_vel += Vec2::new(local.z, -local.x) * if mob { 10.0 } else { 4.0 };
+        if mob && hit.point.y > hit.pos.y + 0.45 {
+            anim.snap = 1.0;
+        }
 
         if hit.killed && anim.hide <= 0.0 {
             // Build the corpse from where the server says they died, in the

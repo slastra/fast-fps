@@ -132,8 +132,14 @@ pub const SURVIVAL_KEEP: [Vec3; 4] = [
 
 // --- Corpses ---------------------------------------------------------------
 
+/// Corpses falling under physics at once; past this the oldest settles
+/// early. Settled corpses cost nothing to simulate, so many more can lie
+/// around: past `MAX_BODIES` the oldest starts sinking early.
 pub const MAX_RAGDOLLS: usize = 6;
-/// Seconds before a corpse fades away.
+pub const MAX_BODIES: usize = 32;
+/// Seconds before a corpse stops moving, and before it sinks into the
+/// ground and is gone.
+pub const RAGDOLL_SETTLE_SECS: f32 = 5.0;
 pub const RAGDOLL_SECS: f32 = 12.0;
 /// A killed mob (a game mode's enemy) stays this long before the server
 /// removes it, so every client has made its ragdoll by then.

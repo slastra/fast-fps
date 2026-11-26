@@ -82,10 +82,15 @@ pub fn on_hit(
         let Ok((mut status, mut zombie)) = zombies.get_mut(h.target) else {
             continue;
         };
+        // Every hit staggers it back a little; a brute hardly notices.
+        let heavy = zombie.kind == crate::survival::protocol::BRUTE;
+        let pellets = h.weapon.def().pellets.max(1) as f32;
+        zombie.stagger = zombie.stagger.max(if heavy { 0.08 } else { 0.25 });
+        zombie.shove += Vec2::new(h.dir.x, h.dir.z).normalize_or_zero()
+            * (if heavy { 0.03 } else { 0.12 } / pellets);
         if h.weapon.def().class != Class::Gun {
             continue;
         }
-        let pellets = h.weapon.def().pellets.max(1) as f32;
         // Effects that would stack absurdly per pellet happen once a shot,
         // on average.
         let once = rng.random::<f32>() < 1.0 / pellets;

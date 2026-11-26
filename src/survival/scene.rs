@@ -4,22 +4,46 @@
 //! healing). All of it is for looks; none of it touches the level's
 //! collision.
 
+use avian3d::prelude::*;
 use bevy::{light::NotShadowCaster, prelude::*};
 use rand::{Rng, SeedableRng, rngs::StdRng};
 
 use super::{
     Me,
     cracks::CRACKS,
-    protocol::{BURNING, CHILLED, FROZEN, Flash, Pickup, PickupKind},
+    protocol::{BLOATER, BURNING, CHILLED, FROZEN, Flash, LEAPER, Pickup, PickupKind},
 };
-use crate::{net::Mob, render::no_shadow, world::BREACH_SIZE};
+use crate::{
+    avatar::{
+        mob::SharedRigs,
+        rig::{AvatarRig, Bone},
+    },
+    net::{Mob, Pose},
+    physics::Layer,
+    render::no_shadow,
+    world::{BREACH_SIZE, breach_courses},
+};
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Flashes>()
         .add_systems(Startup, (make_assets, make_cracks).chain())
         .add_observer(dress_pickup)
         .add_observer(add_aura)
-        .add_systems(Update, (show_cracks, spin_pickups, auras, flashes, age_fx));
+        .add_systems(
+            Update,
+            (
+                show_cracks,
+                burst_open,
+                settle_debris,
+                spin_pickups,
+                auras,
+                pulse_boils,
+                flare_eyes,
+                embers,
+                flashes,
+                age_fx,
+            ),
+        );
 }
 
 #[derive(Resource)]
@@ -43,6 +67,8 @@ struct SceneAssets {
     dust: Handle<StandardMaterial>,
     heal: Handle<StandardMaterial>,
     gas: Handle<StandardMaterial>,
+    flare: Handle<StandardMaterial>,
+    ember: Handle<StandardMaterial>,
 }
 
 fn glowing(color: Color, glow: LinearRgba, alpha: f32) -> StandardMaterial {
@@ -124,6 +150,16 @@ fn make_assets(
             LinearRgba::BLACK,
             0.7,
         )),
+        flare: materials.add(glowing(
+            Color::srgb(1.0, 0.3, 0.15),
+            LinearRgba::rgb(14.0, 2.5, 0.8),
+            0.85,
+        )),
+        ember: materials.add(glowing(
+            Color::srgb(1.0, 0.6, 0.15),
+            LinearRgba::rgb(9.0, 3.0, 0.4),
+            1.0,
+        )),
         gas: materials.add(glowing(
             Color::srgb(0.6, 0.85, 0.3),
             LinearRgba::rgb(0.25, 0.5, 0.08),
@@ -177,36 +213,40 @@ fn make_cracks(mut commands: Commands, assets: Res<SceneAssets>) {
                                 .with_scale(size),
                         ));
                     };
-                // Broken edges: stones jutting into the hole along its sides
-                // and top, on both faces, so it isn't a clean rectangle.
+                // Broken edges: stones jutting into the hole along its
+                // ragged sides and top, on both faces of the wall.
+                let courses = breach_courses(i);
                 for face in [0.08, -WALL - 0.08] {
-                    for side in [-1.0, 1.0] {
-                        let mut y = rng.random_range(0.05..0.3);
-                        while y < h - 0.1 {
+                    for &(y0, y1, half) in &courses {
+                        for side in [-1.0, 1.0] {
+                            if rng.random_bool(0.25) {
+                                continue;
+                            }
+                            let tall = (y1 - y0) * rng.random_range(0.6..1.0);
                             let size = Vec3::new(
-                                rng.random_range(0.18..0.42),
-                                rng.random_range(0.16..0.4),
-                                rng.random_range(0.16..0.3),
+                                rng.random_range(0.16..0.34),
+                                tall,
+                                rng.random_range(0.14..0.26),
                             );
-                            let x = side * (w / 2.0 - rng.random_range(0.02..0.16));
+                            let x = side * (half + rng.random_range(-0.06..0.08));
                             stone(
                                 c,
-                                Vec3::new(x, y + size.y / 2.0, face),
+                                Vec3::new(x, (y0 + y1) / 2.0, face),
                                 size,
-                                rng.random_range(-0.4..0.4),
+                                rng.random_range(-0.35..0.35),
                                 rng.random_bool(0.4),
                             );
-                            y += size.y * rng.random_range(0.7..1.1);
                         }
                     }
-                    let mut x = -w / 2.0;
-                    while x < w / 2.0 {
+                    let top = courses.last().map_or(w / 2.0, |c| c.2);
+                    let mut x = -top;
+                    while x < top {
                         let size = Vec3::new(
-                            rng.random_range(0.2..0.45),
-                            rng.random_range(0.14..0.34),
-                            rng.random_range(0.16..0.3),
+                            rng.random_range(0.2..0.4),
+                            rng.random_range(0.14..0.3),
+                            rng.random_range(0.14..0.26),
                         );
-                        let y = h - size.y / 2.0 + rng.random_range(-0.12..0.06);
+                        let y = h - size.y / 2.0 + rng.random_range(-0.1..0.06);
                         stone(
                             c,
                             Vec3::new(x + size.x / 2.0, y, face),
@@ -217,10 +257,10 @@ fn make_cracks(mut commands: Commands, assets: Res<SceneAssets>) {
                         x += size.x * rng.random_range(0.6..0.95);
                     }
                 }
-                // Rubble on both sides of the wall.
-                for (z0, z1) in [(0.2, 1.4), (-WALL - 1.2, -WALL - 0.2)] {
-                    for _ in 0..7 {
-                        let s = rng.random_range(0.12..0.34);
+                // Rubble on both sides of the wall, most of it fallen in.
+                for (z0, z1, count) in [(0.15, 1.8, 12), (-WALL - 1.2, -WALL - 0.2, 6)] {
+                    for _ in 0..count {
+                        let s = rng.random_range(0.12..0.38);
                         stone(
                             c,
                             Vec3::new(
@@ -235,6 +275,129 @@ fn make_cracks(mut commands: Commands, assets: Res<SceneAssets>) {
                     }
                 }
             });
+    }
+}
+
+/// A stone from a plug that just burst; the number is how long it's been
+/// flying.
+#[derive(Component)]
+struct Debris(f32);
+
+/// Debris stops moving after this long, starts sinking into the ground
+/// after this long, and is gone after this long.
+const DEBRIS_SETTLE: f32 = 4.0;
+const DEBRIS_SINK: f32 = 8.0;
+const DEBRIS_GONE: f32 = 10.0;
+
+/// When a crack opens during a run, its plug bursts inward: its stones fly
+/// in and tumble across the ground, in a cloud of dust.
+fn burst_open(
+    me: Res<Me>,
+    assets: Res<SceneAssets>,
+    mut seen: Local<Option<u16>>,
+    mut commands: Commands,
+) {
+    let now = me.run.as_ref().map(|r| r.cracks);
+    let before = std::mem::replace(&mut *seen, now);
+    let (Some(before), Some(now)) = (before, now) else {
+        return;
+    };
+    let opened = now & !before;
+    if opened == 0 {
+        return;
+    }
+    let mut rng = rand::rng();
+    for (i, crack) in CRACKS.iter().enumerate() {
+        if opened & (1 << i) == 0 {
+            continue;
+        }
+        let base = Vec3::new(crack.at.x, 0.0, crack.at.y);
+        let facing = Quat::from_rotation_y(crack.inward.x.atan2(crack.inward.y));
+        for (y0, y1, half) in breach_courses(i) {
+            let count = if half > 0.55 { 3 } else { 2 };
+            let length = half * 2.0 / count as f32;
+            for k in 0..count {
+                let size = Vec3::new(length * 0.9, (y1 - y0) * 0.9, rng.random_range(0.4..0.7));
+                let local = Vec3::new(-half + length * (k as f32 + 0.5), (y0 + y1) / 2.0, -0.7);
+                let push = Vec3::new(
+                    rng.random_range(-1.4..1.4),
+                    rng.random_range(0.5..2.5),
+                    rng.random_range(2.5..5.5),
+                );
+                let spin = Vec3::new(
+                    rng.random_range(-6.0..6.0),
+                    rng.random_range(-6.0..6.0),
+                    rng.random_range(-6.0..6.0),
+                );
+                commands
+                    .spawn((
+                        Name::new("Debris"),
+                        Debris(0.0),
+                        RigidBody::Dynamic,
+                        Collider::cuboid(size.x, size.y, size.z),
+                        CollisionLayers::new(Layer::Ragdoll, Layer::World),
+                        LinearVelocity(facing * push),
+                        AngularVelocity(spin),
+                        Transform::from_translation(base + facing * local).with_rotation(facing),
+                        Visibility::default(),
+                    ))
+                    .with_child((
+                        Mesh3d(assets.cube.clone()),
+                        MeshMaterial3d(assets.stone_dark.clone()),
+                        Transform::from_scale(size),
+                    ));
+            }
+        }
+        // Dust billowing in through the hole.
+        for _ in 0..14 {
+            let s = rng.random_range(0.35..0.7);
+            let mut puff = fx(
+                rng.random_range(1.0..1.8),
+                Vec3::splat(s),
+                Vec3::splat(s * 2.2),
+            );
+            puff.rise = facing
+                * Vec3::new(
+                    rng.random_range(-0.8..0.8),
+                    rng.random_range(0.2..0.8),
+                    rng.random_range(0.8..2.2),
+                );
+            let at = Vec3::new(
+                rng.random_range(-0.9..0.9),
+                rng.random_range(0.2..2.2),
+                rng.random_range(-0.5..0.6),
+            );
+            commands.spawn((
+                Mesh3d(assets.cube.clone()),
+                MeshMaterial3d(assets.dust.clone()),
+                Transform::from_translation(base + facing * at).with_scale(Vec3::splat(s)),
+                puff,
+                no_shadow(),
+            ));
+        }
+    }
+}
+
+/// Debris tumbles, comes to rest, then sinks into the ground and is gone.
+fn settle_debris(
+    time: Res<Time>,
+    mut debris: Query<(Entity, &mut Debris, &mut Transform)>,
+    mut commands: Commands,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut d, mut transform) in &mut debris {
+        let was = d.0;
+        d.0 += dt;
+        if was < DEBRIS_SETTLE && d.0 >= DEBRIS_SETTLE {
+            commands
+                .entity(entity)
+                .remove::<(RigidBody, Collider, LinearVelocity, AngularVelocity)>();
+        }
+        if d.0 >= DEBRIS_GONE {
+            commands.entity(entity).despawn();
+        } else if d.0 >= DEBRIS_SINK {
+            transform.translation.y -= 0.3 * dt;
+        }
     }
 }
 
@@ -372,6 +535,105 @@ fn auras(
                 None => *visibility = Visibility::Hidden,
             }
         }
+    }
+}
+
+/// A bloater's boils (and eyes) swell and fade, all of them together.
+fn pulse_boils(
+    time: Res<Time>,
+    shared: Res<SharedRigs>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut base: Local<Option<LinearRgba>>,
+) {
+    let Some(handle) = shared.glow(BLOATER) else {
+        return;
+    };
+    let Some(mut material) = materials.get_mut(handle) else {
+        return;
+    };
+    let base = *base.get_or_insert(material.emissive);
+    let k = 0.45 + 0.55 * (0.5 + 0.5 * (time.elapsed_secs() * 3.0).sin());
+    material.emissive = base * k;
+}
+
+/// A glow over a leaper's eyes that flares while it crouches to leap.
+#[derive(Component)]
+struct Flare(Entity);
+
+/// The leapers already given one.
+#[derive(Component)]
+struct Flared;
+
+#[allow(clippy::type_complexity)]
+fn flare_eyes(
+    time: Res<Time>,
+    new: Query<(Entity, &Mob, &AvatarRig), Without<Flared>>,
+    mobs: Query<&Pose>,
+    mut flares: Query<(&Flare, &mut Transform)>,
+    assets: Res<SceneAssets>,
+    mut commands: Commands,
+) {
+    for (entity, mob, rig) in &new {
+        if mob.kind != LEAPER {
+            continue;
+        }
+        commands.entity(entity).insert(Flared);
+        commands.entity(rig.bones[Bone::Head.index()]).with_child((
+            Flare(entity),
+            Mesh3d(assets.ball.clone()),
+            MeshMaterial3d(assets.flare.clone()),
+            Transform::from_xyz(0.0, 0.19, -0.17).with_scale(Vec3::ZERO),
+            NotShadowCaster,
+        ));
+    }
+    let throb = 1.0 + 0.2 * (time.elapsed_secs() * 22.0).sin();
+    for (flare, mut transform) in &mut flares {
+        let crouched = mobs.get(flare.0).is_ok_and(|p| p.has(Pose::CROUCH));
+        let want = if crouched {
+            Vec3::new(0.22, 0.08, 0.04) * throb
+        } else {
+            Vec3::ZERO
+        };
+        let now = transform.scale;
+        transform.scale = now.lerp(want, (time.delta_secs() * 18.0).min(1.0));
+    }
+}
+
+/// Sparks thrown off burning zombies.
+fn embers(
+    time: Res<Time>,
+    mobs: Query<(&Mob, &Pose)>,
+    assets: Res<SceneAssets>,
+    mut commands: Commands,
+    mut rng: Local<Option<StdRng>>,
+) {
+    let rng = rng.get_or_insert_with(|| StdRng::seed_from_u64(31));
+    // About eight a second each.
+    let chance = (time.delta_secs() * 8.0).min(1.0);
+    for (mob, pose) in &mobs {
+        if mob.flags & BURNING == 0 || !rng.random_bool(chance as f64) {
+            continue;
+        }
+        let at = pose.pos
+            + Vec3::new(
+                rng.random_range(-0.3..0.3),
+                rng.random_range(-0.6..0.8),
+                rng.random_range(-0.3..0.3),
+            );
+        let s = rng.random_range(0.04..0.08);
+        let mut spark = fx(rng.random_range(0.4..0.8), Vec3::splat(s), Vec3::ZERO);
+        spark.rise = Vec3::new(
+            rng.random_range(-0.4..0.4),
+            rng.random_range(1.2..2.4),
+            rng.random_range(-0.4..0.4),
+        );
+        commands.spawn((
+            Mesh3d(assets.cube.clone()),
+            MeshMaterial3d(assets.ember.clone()),
+            Transform::from_translation(at).with_scale(Vec3::splat(s)),
+            spark,
+            NotShadowCaster,
+        ));
     }
 }
 

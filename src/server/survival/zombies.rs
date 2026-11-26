@@ -193,6 +193,8 @@ pub struct Zombie {
     pub leap_wait: f32,
     /// Where a leap just landed, for `attack` to hurt whoever is there.
     pub slam: Option<Vec3>,
+    /// Seconds left staggering from a hit: it barely moves.
+    pub stagger: f32,
 }
 
 /// Server-only: zombies waiting to come through the cracks this wave.
@@ -312,6 +314,7 @@ fn zombie(id: u8, wave: u16, crack: usize, next: usize, pos: Vec3, yaw: f32) -> 
             leap: default(),
             leap_wait: 0.5,
             slam: None,
+            stagger: 0.0,
         },
         Status::default(),
     )
@@ -371,6 +374,10 @@ pub fn steer(
         let reach = kind(zombie.kind).reach;
         let close = seen.is_some_and(|p| flat(p.pos).distance(flat(at)) < reach * 0.9);
         let mut speed = zombie.speed * status.speed_scale();
+        if zombie.stagger > 0.0 {
+            zombie.stagger -= dt;
+            speed *= 0.25;
+        }
         if close || zombie.swing.is_some() {
             speed = 0.0;
         }

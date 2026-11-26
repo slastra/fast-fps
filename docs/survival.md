@@ -17,7 +17,11 @@ by whoever runs an online game); `mode survival` again starts it over, and `mode
   first. A zombie that sees you (within 18 m, no wall between) comes straight for you; once
   inside the keep, they all come for whoever is nearest, by a door if the keep's wall is in
   the way.
-- **Kinds.** Each has its own two glowing dot eyes, so you can tell them apart at night.
+- **Kinds.** Each has its own two glowing dot eyes, so you can tell them apart at night,
+  and its own way of moving: walkers limp and list with an arm hanging, runners lean into a
+  sprint, brutes stomp. A hit rocks a zombie back and slows it for a moment (a brute hardly
+  notices), and a headshot snaps its head back. The dead fall, settle, and after a while sink
+  into the ground.
 
   | Kind | From wave | Health | Speed | | Eyes |
   |---|---|---|---|---|---|
@@ -45,7 +49,10 @@ seconds later a new run starts from nothing.
 
 ## The cards
 
-At each breather you're offered three cards; press **1**, **2** or **3** (or `pick 1`). If you
+At each breather you're offered three cards; press **1**, **2** or **3** (or `pick 1`). Each
+is framed in its rarity's metal (stone, steel, or shimmering gold) and shows what it gives:
+the gun's own icon, a round of the ammo, or a perk's emblem. Its foot shows how far a gun's
+levels go, or which combo an ammo would make with what you have. If you
 haven't chosen when the wave starts, one is picked for you. Cards are only offered when they
 make sense: a level for a gun you own, the next level up, ammo while you have a free slot.
 
@@ -104,6 +111,7 @@ yet for whoever runs an online game):
 | `zombie [walker\|runner\|brute\|crawler\|bloater\|leaper] [x z]` | A zombie now, 6 m in front of you or at x z, going for the nearest player. |
 | `next_wave` | End the breather now. |
 | `end_wave` | Clear the wave's zombies now. |
+| `offer <card>, <card>[, <card>]` | Offer these cards now (`offer Shotgun, Frost, Hair Trigger`). |
 
 Probe values for scripts: `survival` (`none`, `breather`, `wave`, `over`), `wave`, `zombies`
 (left this wave), `cracks` (open), `fallen` (0 up, 1 down, 2 bled out), `bleed`, `offer`,
@@ -119,7 +127,7 @@ The mode is contained: the rest of the game knows nothing of zombies or cards.
 | | |
 |---|---|
 | `src/server/survival/` | The rules: `mod.rs` (the run, the mode switch), `loadout.rs` (what a player's cards give them: weapons, rounds, mods, and the `Build` the other systems read), `commands.rs` (the test commands), `waves.rs` (phases and sizes, unit tested), `zombies.rs` (the kinds, spawning, walking, attacking), `kinds.rs` (the leaper's leap, the bloater's burst and gas), `status.rs` (burning, chill, frozen), `effects.rs` (ammo, combos, perks on a hit), `downed.rs`, `drops.rs`, `draft.rs` |
-| `src/survival/` | Shared and client: `cards.rs` (the card table and what a hand adds up to, unit tested), `cracks.rs` (which breaches the cracks are, the routes, the doors, opening breaches), `protocol.rs` (wire types), `looks.rs` (each kind's colors, parts and eyes), `sounds.rs` (what plays when), `hud.rs`, `scene.rs` (broken breaches, pickups, auras, flashes, gas), `mod.rs` (keys, limits, probe) |
+| `src/survival/` | Shared and client: `cards.rs` (the card table and what a hand adds up to, unit tested), `cracks.rs` (which breaches the cracks are, the routes, the doors, opening breaches), `protocol.rs` (wire types), `looks.rs` (each kind's colors, parts, eyes and gait), `draft_ui.rs` (the cards), `art.rs` (card pictures drawn in code), `sounds.rs` (what plays when), `hud.rs`, `scene.rs` (broken breaches, pickups, auras, flashes, gas), `mod.rs` (keys, limits, probe) |
 | `src/config.rs` | `SURVIVAL_*`: wave size, breather lengths, drop rates, bleed-out, revive |
 
 It uses the core's general hooks, which any mode can: `Rules` (respawns, friendly fire,

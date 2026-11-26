@@ -63,6 +63,29 @@ pub const fn breach(i: usize) -> (Vec2, Vec2) {
     }
 }
 
+/// The outline of breach `i`, as courses of stone from the ground up: each
+/// (bottom, top, half the hole's width there). Ragged at the sides and
+/// narrowing to a rough arch at the top. It has collision, so it's the same
+/// on every machine; `survival/scene.rs` dresses the hole along it.
+pub fn breach_courses(i: usize) -> Vec<(f32, f32, f32)> {
+    let mut rng = StdRng::seed_from_u64(0xb4ea_c500 + i as u64);
+    let (w, h) = (BREACH_SIZE.x, BREACH_SIZE.y);
+    let mut out = Vec::new();
+    let mut y = 0.0;
+    while y < h - 0.01 {
+        let mut top = y + rng.random_range(0.3..0.48);
+        if h - top < 0.2 {
+            top = h;
+        }
+        let t = ((y + top) / 2.0 / h - 0.55).max(0.0) / 0.45;
+        let arch = 1.0 - 0.5 * t * t * (3.0 - 2.0 * t);
+        let half = (w / 2.0 * arch + rng.random_range(-0.12..0.12)).clamp(0.32, w / 2.0 + 0.12);
+        out.push((y, top, half));
+        y = top;
+    }
+    out
+}
+
 /// The block filling breach `i`, and its collider: both carry this. Open,
 /// the block is hidden and the collider only stops the local player
 /// (`Layer::Barrier`), so zombies, bullets and grenades go through but
@@ -455,37 +478,79 @@ fn perimeter(b: &mut Builder) {
                     lowpoly::block(footing, STONE_DARK, 0.07, &mut b.paint);
                     let paint = StdRng::seed_from_u64(0xb4ea_c400 + n as u64);
                     let saved = std::mem::replace(&mut b.paint, paint);
-                    // Two piers and a lintel around the hole.
-                    let (w, h) = (BREACH_SIZE.x, BREACH_SIZE.y);
-                    let pier = (seg + 0.02 - w) / 2.0;
+                    // Stone courses around a ragged hole, then solid wall
+                    // above it.
+                    let h = BREACH_SIZE.y;
+                    let edge_of_seg = (seg + 0.02) / 2.0;
+                    let courses = breach_courses(n);
+                    // Each side: one tall block out to the hole's widest
+                    // point, then a strip of stones in courses for its
+                    // ragged edge.
+                    let widest = courses.iter().map(|c| c.2).fold(0.0, f32::max);
                     for s in [-1.0, 1.0] {
-                        let a = along + s * (w + pier) / 2.0;
-                        let size = dims(pier, height, thickness);
+                        let pier = edge_of_seg - widest;
                         b.block(
-                            place(a, height / 2.0, 0.0),
-                            size,
+                            place(along + s * (widest + pier / 2.0), h / 2.0, 0.0),
+                            dims(pier, h, thickness),
                             Quat::IDENTITY,
                             color,
                             0.06,
                         );
+                        for &(y0, y1, half) in &courses {
+                            let strip = widest - half;
+                            if strip < 0.02 {
+                                continue;
+                            }
+                            b.block(
+                                place(along + s * (half + strip / 2.0), (y0 + y1) / 2.0, 0.0),
+                                dims(strip, y1 - y0, thickness),
+                                Quat::IDENTITY,
+                                color,
+                                0.06,
+                            );
+                        }
+                    }
+                    let bottom = courses[0].2;
+                    for s in [-1.0, 1.0] {
+                        let pier = edge_of_seg - bottom;
                         b.trim(
-                            place(a, 0.3, 0.0),
+                            place(along + s * (bottom + pier / 2.0), 0.3, 0.0),
                             dims(pier, 0.6, thickness + 0.3),
                             STONE_DARK,
                         );
                     }
                     b.block(
                         place(along, h + (height - h) / 2.0, 0.0),
-                        dims(w, height - h, thickness),
+                        dims(seg + 0.02, height - h, thickness),
                         Quat::IDENTITY,
                         color,
                         0.06,
                     );
-                    // The plug: rougher, darker stone set a little back.
+                    // The plug: the hole bricked up with rough, darker
+                    // stones, set a little back. One mesh and one collider.
                     let center = place(along, h / 2.0, 0.0);
-                    let mesh =
-                        lowpoly::block(dims(w, h, thickness - 0.24), STONE_DARK, 0.1, &mut b.paint);
-                    let handle = b.meshes.add(mesh);
+                    let mut stones = Vec::new();
+                    let mut shape = Vec::new();
+                    for &(y0, y1, half) in &courses {
+                        let mid = (y0 + y1) / 2.0 - h / 2.0;
+                        let course = dims(half * 2.0, y1 - y0, thickness);
+                        shape.push((
+                            Vec3::Y * mid,
+                            Quat::IDENTITY,
+                            Collider::cuboid(course.x, course.y, course.z),
+                        ));
+                        // Two or three stones to a course.
+                        let count = if half > 0.55 { 3 } else { 2 };
+                        let length = half * 2.0 / count as f32;
+                        for k in 0..count {
+                            let a = -half + length * (k as f32 + 0.5);
+                            let size = dims(length + 0.01, y1 - y0 + 0.01, thickness - 0.24);
+                            let offset = dims(a, 0.0, 0.0) + Vec3::Y * mid;
+                            let mesh = lowpoly::block(size, STONE_DARK, 0.14, &mut b.paint);
+                            stones.push(mesh.transformed_by(Transform::from_translation(offset)));
+                        }
+                    }
+                    let handle = b.meshes.add(lowpoly::merge(stones));
                     b.commands.spawn((
                         Name::new("Breach plug"),
                         Breach(n),
@@ -493,15 +558,15 @@ fn perimeter(b: &mut Builder) {
                         MeshMaterial3d(b.material.clone()),
                         Transform::from_translation(center),
                     ));
-                    let size = dims(w, h, thickness);
                     b.commands.spawn((
                         Name::new("Breach plug collider"),
                         Breach(n),
                         RigidBody::Static,
-                        Collider::cuboid(size.x, size.y, size.z),
+                        Collider::compound(shape),
                         CollisionLayers::new(Layer::World, LayerMask::ALL),
                         Transform::from_translation(center),
                     ));
+                    let size = dims(BREACH_SIZE.x + 0.4, h, thickness);
                     b.taken.push(Footprint::new(center, size, 0.0));
                     b.paint = saved;
                 }

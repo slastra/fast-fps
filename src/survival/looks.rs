@@ -6,6 +6,7 @@ use bevy::prelude::*;
 
 use super::protocol::{BLOATER, BRUTE, CRAWLER, LEAPER, RUNNER, WALKER};
 use crate::avatar::{
+    anim::Gait,
     mob::{MobLook, MobLookAppExt},
     rig::{Bone, Extra, Eyes, Look, Paint, extra},
 };
@@ -58,6 +59,59 @@ const BELLY: &[Extra] = &[
     ),
 ];
 
+/// The brute: iron plates on its shoulders, a heavy jaw, a barrel chest
+/// and fists like hams.
+const BRUTISH: &[Extra] = &[
+    extra(
+        Bone::Torso,
+        [0.6, 0.34, 0.36],
+        [0.0, 0.32, -0.03],
+        Paint::Team,
+    ),
+    extra(
+        Bone::Torso,
+        [0.2, 0.15, 0.34],
+        [-0.27, 0.5, 0.0],
+        Paint::Metal,
+    ),
+    extra(
+        Bone::Torso,
+        [0.2, 0.15, 0.34],
+        [0.27, 0.5, 0.0],
+        Paint::Metal,
+    ),
+    extra(
+        Bone::Torso,
+        [0.06, 0.07, 0.06],
+        [-0.27, 0.6, -0.08],
+        Paint::Pale,
+    ),
+    extra(
+        Bone::Torso,
+        [0.06, 0.07, 0.06],
+        [0.27, 0.6, -0.08],
+        Paint::Pale,
+    ),
+    extra(
+        Bone::Head,
+        [0.3, 0.11, 0.2],
+        [0.0, 0.03, -0.1],
+        Paint::TeamDark,
+    ),
+    extra(
+        Bone::ForearmL,
+        [0.17, 0.16, 0.18],
+        [0.0, -0.3, 0.0],
+        Paint::TeamDark,
+    ),
+    extra(
+        Bone::ForearmR,
+        [0.17, 0.16, 0.18],
+        [0.0, -0.3, 0.0],
+        Paint::TeamDark,
+    ),
+];
+
 /// The crawler drags what's left of its hips.
 const STUMPS: &[Extra] = &[
     extra(
@@ -97,6 +151,24 @@ const CLAWS: &[Extra] = &[
     ),
 ];
 
+/// How each kind moves: walkers shamble, runners lean into a sprint, brutes
+/// stomp, bloaters waddle, leapers hunch.
+fn gait(kind: u8) -> Gait {
+    let (shamble, lean, stomp) = match kind {
+        WALKER => (1.0, 0.1, 0.0),
+        RUNNER => (0.25, 0.35, 0.0),
+        BRUTE => (0.2, 0.12, 1.0),
+        BLOATER => (0.55, 0.0, 0.4),
+        LEAPER => (0.3, 0.28, 0.0),
+        _ => (0.0, 0.0, 0.0),
+    };
+    Gait {
+        shamble,
+        lean,
+        stomp,
+    }
+}
+
 pub(super) fn plugin(app: &mut App) {
     let looks = [
         (
@@ -117,11 +189,14 @@ pub(super) fn plugin(app: &mut App) {
         ),
         (
             BRUTE,
-            zombie(
-                Color::srgb(0.33, 0.27, 0.36),
-                Color::srgb(0.16, 0.12, 0.14),
-                Color::srgb(0.9, 0.2, 1.0),
-            ),
+            Look {
+                extras: BRUTISH,
+                ..zombie(
+                    Color::srgb(0.33, 0.27, 0.36),
+                    Color::srgb(0.16, 0.12, 0.14),
+                    Color::srgb(0.9, 0.2, 1.0),
+                )
+            },
         ),
         (
             CRAWLER,
@@ -159,6 +234,13 @@ pub(super) fn plugin(app: &mut App) {
         ),
     ];
     for (kind, look) in looks {
-        app.mob_look(kind, MobLook { look, gun: false });
+        app.mob_look(
+            kind,
+            MobLook {
+                look,
+                gun: false,
+                gait: gait(kind),
+            },
+        );
     }
 }
