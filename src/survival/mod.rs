@@ -12,6 +12,7 @@
 pub mod cards;
 pub mod cracks;
 mod hud;
+mod looks;
 pub mod protocol;
 pub mod scene;
 
@@ -19,10 +20,6 @@ use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
 use crate::{
-    avatar::{
-        mob::{MobLook, MobLookAppExt},
-        rig::Look,
-    },
     config::SURVIVAL_REVIVE_RANGE,
     console::{ConsoleAppExt, ConsoleCommand, Print},
     debug::probe::Probe,
@@ -31,43 +28,10 @@ use crate::{
     weapon::{Arsenal, MenuKeys},
 };
 use cards::{Build, CARDS, Perk};
-use protocol::{BRUTE, Fallen, Offer, Phase, PickCard, RUNNER, Revive, Survival, Upgrades, WALKER};
+use protocol::{Fallen, Offer, Phase, PickCard, Revive, Survival, Upgrades};
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Me>()
-        .mob_look(
-            WALKER,
-            MobLook {
-                look: Look {
-                    body: Color::srgb(0.36, 0.45, 0.30),
-                    trim: Color::srgb(0.22, 0.20, 0.17),
-                    glow: Color::srgb(1.0, 0.25, 0.15),
-                },
-                gun: false,
-            },
-        )
-        .mob_look(
-            RUNNER,
-            MobLook {
-                look: Look {
-                    body: Color::srgb(0.62, 0.60, 0.38),
-                    trim: Color::srgb(0.30, 0.18, 0.14),
-                    glow: Color::srgb(1.0, 0.85, 0.2),
-                },
-                gun: false,
-            },
-        )
-        .mob_look(
-            BRUTE,
-            MobLook {
-                look: Look {
-                    body: Color::srgb(0.33, 0.27, 0.36),
-                    trim: Color::srgb(0.16, 0.12, 0.14),
-                    glow: Color::srgb(0.9, 0.2, 1.0),
-                },
-                gun: false,
-            },
-        )
         .add_systems(
             PreUpdate,
             (sum_up, limits, picks, revive)
@@ -77,7 +41,9 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(Update, probe);
     hud::plugin(app);
+    looks::plugin(app);
     scene::plugin(app);
+    cracks::add_breaches(app);
     app.console_command(
         "pick",
         "<1|2|3>",
@@ -277,6 +243,19 @@ fn probe(
     probe.set("bursts", flashes.bursts);
     probe.set("fires", flashes.fires);
     probe.set("heals", flashes.heals);
+    probe.set("gases", flashes.gases);
+    probe.set(
+        "crawling",
+        mobs.iter().filter(|m| m.0.has(Pose::CRAWL)).count(),
+    );
+    probe.set(
+        "leaping",
+        mobs.iter().filter(|m| m.0.has(Pose::AIR)).count(),
+    );
+    probe.set(
+        "tells",
+        mobs.iter().filter(|m| m.0.has(Pose::CROUCH)).count(),
+    );
     // How far the nearest zombie is (99: none).
     let at = players
         .iter()

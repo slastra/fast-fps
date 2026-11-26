@@ -10,13 +10,23 @@ by whoever runs an online game); `mode survival` again starts it over, and `mode
 - **Waves.** After a 5 second breather, wave 1 sends 3 walkers. Each wave after brings 2 more
   (`3 + 2·(n−1)`), a little tougher and faster. At most 24 are up at once; the rest wait their
   turn at the cracks.
-- **Cracks.** Zombies climb through cracks in the outer wall and walk to the keep's doors. Wave
-  1 opens one crack, wave 2 a second, then one more every other wave, up to all twelve. The
-  four beside the north and south doors open first. A zombie that sees you (within 18 m, no
-  wall between) comes straight for you; once inside the keep, they all come for whoever is
-  nearest, by a door if the keep's wall is in the way.
-- **Kinds.** Walkers from wave 1, runners (fast, fragile) from wave 5, brutes (slow, very
-  tough, hit hard) from wave 10.
+- **Cracks.** The outer wall has twelve bricked-up breaches. A crack is one of them broken
+  open: zombies come from outside and climb in through the hole, and shots and grenades go
+  through it, but players can't walk out. Wave 1 opens one crack, wave 2 a second, then one
+  more every other wave, up to all twelve. The four beside the north and south doors open
+  first. A zombie that sees you (within 18 m, no wall between) comes straight for you; once
+  inside the keep, they all come for whoever is nearest, by a door if the keep's wall is in
+  the way.
+- **Kinds.** Each has its own two glowing dot eyes, so you can tell them apart at night.
+
+  | Kind | From wave | Health | Speed | | Eyes |
+  |---|---|---|---|---|---|
+  | Walker | 1 | 80 | 2.2 m/s | Swings for 15 | Red |
+  | Crawler | 3 | 35 | 3.4 m/s | Legless, low to the ground, in packs of four through one crack. Swings for 8. Aim low. | Red |
+  | Bloater | 4 | 140 | 1.4 m/s | Bursts when it reaches you or is killed: up to 50 to players and zombies within 3 m, then gas that hurts anyone in it for 4 s. Pop it at range, ideally in a crowd. | Green |
+  | Runner | 5 | 50 | 4.5 m/s | Swings for 10 | Yellow |
+  | Leaper | 8 | 70 | 2.6 m/s | From 3.5 to 9 m away it crouches for 0.6 s, then leaps and lands on you for 30. Sidestep the crouch. Claws for 12 up close. | Red |
+  | Brute | 10 | 400 | 1.6 m/s | Swings for 35 | Purple |
 - **Breathers.** When a wave is cleared there are 15 seconds before the next. Everyone gets a
   spare magazine for every gun they own and is offered three cards (see below).
 - **Ammo is scarce.** Guns have the rounds they came with and what you find: a killed zombie
@@ -81,7 +91,7 @@ yet for whoever runs an online game):
 | Command | |
 |---|---|
 | `give_card <name>` | Take a card now, if it could be offered (`give_card Twin Belt`). |
-| `zombie [walker\|runner\|brute] [x z]` | A zombie now, 6 m in front of you or at x z, going for the nearest player. |
+| `zombie [walker\|runner\|brute\|crawler\|bloater\|leaper] [x z]` | A zombie now, 6 m in front of you or at x z, going for the nearest player. |
 | `next_wave` | End the breather now. |
 | `end_wave` | Clear the wave's zombies now. |
 
@@ -89,8 +99,8 @@ Probe values for scripts: `survival` (`none`, `breather`, `wave`, `over`), `wave
 (left this wave), `cracks` (open), `fallen` (0 up, 1 down, 2 bled out), `bleed`, `offer`,
 `cards`, `card_names`, `owned`, `spare` (spare rounds for the gun in hand, -1 unlimited),
 `helping` (a downed teammate is in reach), `team_down`, `team_out`, `zombie_near` (meters),
-`burning`, `chilled`, `frozen` (zombies), and `arcs`, `bursts`, `fires`, `heals` (effects
-seen so far).
+`burning`, `chilled`, `frozen`, `crawling`, `leaping`, `tells` (zombies crouched to leap),
+and `arcs`, `bursts`, `fires`, `heals`, `gases` (effects seen so far).
 
 ## Where it lives
 
@@ -98,8 +108,8 @@ The mode is contained: the rest of the game knows nothing of zombies or cards.
 
 | | |
 |---|---|
-| `src/server/survival/` | The rules: `mod.rs` (the run, the mode switch, what cards do to weapons), `waves.rs` (phases and sizes, unit tested), `zombies.rs` (spawning, walking, attacking), `status.rs` (burning, chill, frozen), `effects.rs` (ammo, combos, perks on a hit), `downed.rs`, `drops.rs`, `draft.rs` |
-| `src/survival/` | Shared and client: `cards.rs` (the card table and what a hand adds up to, unit tested), `cracks.rs` (where the cracks are, the routes, the doors), `protocol.rs` (wire types), `hud.rs`, `scene.rs` (cracks, pickups, auras, flashes), `mod.rs` (keys, limits, probe) |
+| `src/server/survival/` | The rules: `mod.rs` (the run, the mode switch, what cards do to weapons), `waves.rs` (phases and sizes, unit tested), `zombies.rs` (the kinds, spawning, walking, attacking), `kinds.rs` (the leaper's leap, the bloater's burst and gas), `status.rs` (burning, chill, frozen), `effects.rs` (ammo, combos, perks on a hit), `downed.rs`, `drops.rs`, `draft.rs` |
+| `src/survival/` | Shared and client: `cards.rs` (the card table and what a hand adds up to, unit tested), `cracks.rs` (which breaches the cracks are, the routes, the doors, opening breaches), `protocol.rs` (wire types), `looks.rs` (each kind's colors, parts and eyes), `hud.rs`, `scene.rs` (broken breaches, pickups, auras, flashes, gas), `mod.rs` (keys, limits, probe) |
 | `src/config.rs` | `SURVIVAL_*`: wave size, breather lengths, drop rates, bleed-out, revive |
 
 It uses the core's general hooks, which any mode can: `Rules` (respawns, friendly fire,
@@ -122,7 +132,7 @@ dummies, player ragdolls), `ModeChange` and `Died`, `Kit` (owned weapons and fin
 
 ## What the tests can't tell you
 
-The scenarios (`survival.cfg`, `survival_down.cfg`, `survival_cards.cfg` and the
-`survival_coop_*` pair) check that waves, cracks, going down, reviving, bleeding out, the
+The scenarios (`survival.cfg`, `survival_down.cfg`, `survival_cards.cfg`,
+`survival_kinds.cfg` and the `survival_coop_*` pair) check that waves, cracks, going down, reviving, bleeding out, the
 draft and the ammo effects work. They can't tell you whether the difficulty curve is fun,
 whether the cards are balanced, or how a horde feels and sounds with a real mouse.

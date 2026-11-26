@@ -33,10 +33,11 @@ src/
 
   survival/      Co-op survival (`mode survival`), shared and as you see it.
     cards.rs       The card table, and what a hand of cards adds up to.
-    cracks.rs      The cracks in the walls, routes to the keep, its doors.
+    cracks.rs      The cracks (opened breaches in the wall), routes to the keep, its doors.
+    looks.rs       Each kind of zombie: colors, extra or missing parts, dot eyes.
     protocol.rs    Survival's wire types.
     hud.rs         The wave line, the cards, being down, the revive prompt.
-    scene.rs       Cracks, pickups, burning and frozen zombies, arcs and bursts.
+    scene.rs       Broken breaches, pickups, burning and frozen zombies, arcs, bursts, gas.
     mod.rs         Card keys, revive key, movement limits while down, probe values.
   lowpoly.rs     The shape kit: beveled blocks, crates, barrels, rocks, pines, grass.
 
@@ -63,7 +64,8 @@ src/
     bots.rs        Practice bots and the `bot` commands. Dueling bots fire back.
     rules.rs       Game modes: `mode`, the `Rules`, `Died`, and the other hooks a mode uses.
     duel.rs        The duel game mode (`mode duel`): rounds, marks, who's in and out.
-    survival/      Survival's rules: waves, zombies, going down, drops, the draft, ammo effects.
+    survival/      Survival's rules: waves, zombies and their kinds, going down, drops, the
+                   draft, ammo effects.
     admin.rs       Who runs a dedicated server's game, and their commands from afar.
 
   player/        The character you control.

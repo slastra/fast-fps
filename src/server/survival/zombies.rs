@@ -23,8 +23,8 @@ use crate::{
         players::{PlayerClient, hitbox},
     },
     survival::{
-        cracks::{CRACKS, entry, way_to},
-        protocol::{BRUTE, Fallen, Flash, RUNNER, WALKER},
+        cracks::{CRACKS, entry, route_len, way_to, waypoint},
+        protocol::{BLOATER, BRUTE, CRAWLER, Fallen, Flash, LEAPER, RUNNER, WALKER},
     },
     weapon::WeaponKind,
 };
@@ -51,7 +51,7 @@ pub struct Kind {
     pub cooldown: f32,
 }
 
-pub const KINDS: [Kind; 3] = [
+pub const KINDS: [Kind; 6] = [
     Kind {
         id: WALKER,
         name: "Walker",
@@ -79,23 +79,90 @@ pub const KINDS: [Kind; 3] = [
         reach: 1.6,
         cooldown: 1.8,
     },
+    // Low and quick, in packs (`fill_wave`).
+    Kind {
+        id: CRAWLER,
+        name: "Crawler",
+        health: 35.0,
+        speed: 3.4,
+        damage: 8.0,
+        reach: 1.2,
+        cooldown: 0.8,
+    },
+    // Doesn't swing: bursts when it reaches you (`kinds.rs`). `damage` is
+    // the burst's.
+    Kind {
+        id: BLOATER,
+        name: "Bloater",
+        health: 140.0,
+        speed: 1.4,
+        // At the middle; less farther out.
+        damage: 50.0,
+        reach: 1.3,
+        cooldown: 0.0,
+    },
+    // Claws up close; leaps from farther (`kinds.rs`).
+    Kind {
+        id: LEAPER,
+        name: "Leaper",
+        health: 70.0,
+        speed: 2.6,
+        damage: 12.0,
+        reach: 1.3,
+        cooldown: 1.0,
+    },
 ];
+
+/// The pose a kind walks in: arms out, or crawling.
+pub fn walking_flags(id: u8) -> u8 {
+    if id == CRAWLER {
+        Pose::CRAWL
+    } else {
+        Pose::REACH
+    }
+}
 
 pub fn kind(id: u8) -> &'static Kind {
     KINDS.iter().find(|k| k.id == id).unwrap_or(&KINDS[0])
 }
 
-/// Which kind wave `n` sends next: walkers, then some runners from wave 5
-/// and some brutes from wave 10.
+/// The mix of a wave: (kind, from wave, share). Walkers are the rest.
+const MIX: [(u8, u16, f32); 5] = [
+    (CRAWLER, 3, 0.12),
+    (BLOATER, 4, 0.10),
+    (RUNNER, 5, 0.20),
+    (LEAPER, 8, 0.08),
+    (BRUTE, 10, 0.08),
+];
+/// Crawlers come this many at a time.
+const PACK: usize = 4;
+
+/// Which kind wave `n` sends next.
 pub fn pick_kind(n: u16, rng: &mut impl Rng) -> u8 {
-    let roll = rng.random::<f32>();
-    if n >= 10 && roll < 0.08 {
-        BRUTE
-    } else if n >= 5 && roll < 0.28 {
-        RUNNER
-    } else {
-        WALKER
+    let mut roll = rng.random::<f32>();
+    for (id, from, share) in MIX {
+        if n >= from {
+            if roll < share {
+                return id;
+            }
+            roll -= share;
+        }
     }
+    WALKER
+}
+
+/// Wave `n`'s zombies, last to come first: `size` of them, crawlers in
+/// packs that come through together.
+pub fn fill_wave(n: u16, size: usize, rng: &mut impl Rng) -> Vec<u8> {
+    let mut queue = Vec::with_capacity(size);
+    while queue.len() < size {
+        let id = pick_kind(n, rng);
+        let count = if id == CRAWLER { PACK } else { 1 };
+        for _ in 0..count.min(size - queue.len()) {
+            queue.push(id);
+        }
+    }
+    queue
 }
 
 /// Health grows 8% a wave, speed 2% a wave (up to a third more).
@@ -121,6 +188,11 @@ pub struct Zombie {
     pub swing: Option<f32>,
     /// A push it's taking (a shotgun's Slug Kick), applied as it walks.
     pub shove: Vec2,
+    /// A leaper's leap (`kinds.rs`), and seconds until the next.
+    pub leap: super::kinds::Leap,
+    pub leap_wait: f32,
+    /// Where a leap just landed, for `attack` to hurt whoever is there.
+    pub slam: Option<Vec3>,
 }
 
 /// Server-only: zombies waiting to come through the cracks this wave.
@@ -132,6 +204,8 @@ pub struct Spawner {
     /// Open cracks, and how often each is chosen (the Barricade perk lowers
     /// the one nearest whoever has it).
     pub weights: Vec<(usize, f32)>,
+    /// The crack a pack of crawlers is coming through.
+    pub pack: Option<usize>,
 }
 
 /// Bring the next queued zombie through a crack, when there's room.
@@ -165,20 +239,54 @@ pub fn spawn(
     let Some(id) = spawner.queue.pop() else {
         return;
     };
+    // A pack comes through one crack, close together.
+    let crack = if id == CRAWLER {
+        *spawner.pack.get_or_insert(crack)
+    } else {
+        crack
+    };
+    if id == CRAWLER && spawner.queue.last() == Some(&CRAWLER) {
+        spawner.timer = 0.3;
+    } else {
+        spawner.pack = None;
+    }
     let pos = entry(crack);
+    let hole = CRACKS[crack].at;
     flash.write(ToClients {
         targets: SendTargets::All,
-        message: Flash::Dust { at: pos },
+        message: Flash::Dust {
+            at: Vec3::new(hole.x, 0.9, hole.y),
+        },
     });
     let inward = CRACKS[crack].inward;
     let yaw = (-inward.x).atan2(-inward.y);
-    commands.spawn(zombie(id, spawner.wave, crack, 0, pos, yaw));
+    spawn_zombie(&mut commands, id, spawner.wave, crack, 0, pos, yaw);
 }
 
 /// A zombie of kind `id`, as tough as wave `wave` makes it, at `pos`,
 /// following crack `crack`'s route from point `next` (past the end: it goes
 /// for whoever is nearest).
-pub fn zombie(id: u8, wave: u16, crack: usize, next: usize, pos: Vec3, yaw: f32) -> impl Bundle {
+pub fn spawn_zombie(
+    commands: &mut Commands,
+    id: u8,
+    wave: u16,
+    crack: usize,
+    next: usize,
+    pos: Vec3,
+    yaw: f32,
+) {
+    let mut zombie = commands.spawn(zombie(id, wave, crack, next, pos, yaw));
+    if id == CRAWLER {
+        // Lying along the ground, head first: shoot low.
+        zombie.insert(Collider::compound(vec![(
+            Vec3::new(0.0, -0.62, -0.15),
+            Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+            Collider::capsule(0.28, 0.8),
+        )]));
+    }
+}
+
+fn zombie(id: u8, wave: u16, crack: usize, next: usize, pos: Vec3, yaw: f32) -> impl Bundle {
     let k = kind(id);
     let (health, speed) = scaled(k, wave);
     (
@@ -190,7 +298,7 @@ pub fn zombie(id: u8, wave: u16, crack: usize, next: usize, pos: Vec3, yaw: f32)
         Pose {
             pos,
             yaw,
-            flags: Pose::REACH,
+            flags: walking_flags(id),
             ..default()
         },
         Transform::from_translation(pos),
@@ -204,6 +312,9 @@ pub fn zombie(id: u8, wave: u16, crack: usize, next: usize, pos: Vec3, yaw: f32)
             cooldown: 0.0,
             swing: None,
             shove: Vec2::ZERO,
+            leap: default(),
+            leap_wait: 0.5,
+            slam: None,
         },
         Status::default(),
     )
@@ -229,11 +340,15 @@ pub fn steer(
     let mut rng = rand::rng();
 
     for (mut zombie, mut pose, status) in &mut zombies {
+        // A leaper mid-leap is moved by `kinds::leap`.
+        if zombie.leap.busy() {
+            continue;
+        }
         let at = pose.pos;
         let flat = |v: Vec3| Vec2::new(v.x, v.z);
         // Someone to chase: in sight, or anyone once inside the keep.
-        let route = CRACKS[zombie.crack].route;
-        let arrived = zombie.next >= route.len();
+        let arrived = zombie.next >= route_len(zombie.crack);
+        let point = (!arrived).then(|| waypoint(zombie.crack, zombie.next));
         let seen = prey
             .iter()
             .filter(|p| {
@@ -246,11 +361,13 @@ pub fn steer(
             // wall is between.
             Some(p) if !arrived || can_see(&spatial, &walls, at, p.pos) => flat(p.pos),
             Some(p) => way_to(flat(at), flat(p.pos)),
-            None if !arrived => route[zombie.next],
+            None if let Some(point) = point => point,
             // Nobody left standing: mill about in the keep.
             None => Vec2::new(rng.random_range(-3.0..3.0), rng.random_range(-3.0..3.0)),
         };
-        if !arrived && flat(at).distance(route[zombie.next]) < ARRIVE {
+        if let Some(point) = point
+            && flat(at).distance(point) < ARRIVE
+        {
             zombie.next += 1;
         }
 
@@ -282,7 +399,7 @@ pub fn steer(
             zombie.yaw += turn.clamp(-TURN * dt, TURN * dt);
         }
 
-        let mut flags = Pose::REACH;
+        let mut flags = walking_flags(zombie.kind);
         if zombie.swing.is_some() {
             flags |= Pose::SWING;
         }
@@ -300,7 +417,12 @@ pub fn steer(
 }
 
 /// No wall between a zombie's eyes and a player's chest.
-fn can_see(spatial: &SpatialQuery, walls: &SpatialQueryFilter, from: Vec3, to: Vec3) -> bool {
+pub(super) fn can_see(
+    spatial: &SpatialQuery,
+    walls: &SpatialQueryFilter,
+    from: Vec3,
+    to: Vec3,
+) -> bool {
     let eye = from + Vec3::Y * 0.6;
     let chest = to + Vec3::Y * 0.3;
     let Ok(dir) = Dir3::new(chest - eye) else {
@@ -350,7 +472,7 @@ fn keep_apart(crowd: &[Vec3], at: Vec3) -> Vec2 {
 
 /// The collider-center height for a body standing at `at`: the ground
 /// below, plus half its height.
-fn ground(spatial: &SpatialQuery, walls: &SpatialQueryFilter, at: Vec3) -> Option<f32> {
+pub(super) fn ground(spatial: &SpatialQuery, walls: &SpatialQueryFilter, at: Vec3) -> Option<f32> {
     let from = Vec3::new(at.x, at.y + 1.0, at.z);
     spatial
         .cast_ray(from, Dir3::NEG_Y, 4.0, true, walls)
@@ -405,6 +527,35 @@ pub fn attack(
                 .min_by(|a, b| a.1.distance(at).total_cmp(&b.1.distance(at)))
                 .copied()
         };
+        // A leap landed: everyone under it is hit.
+        if let Some(slam) = zombie.slam.take() {
+            for &(target, pos) in &targets {
+                if pos.distance(slam) < super::kinds::LEAP_RADIUS
+                    && let Some(hurt) = hits.hurt(
+                        entity,
+                        target,
+                        super::kinds::LEAP_DAMAGE,
+                        false,
+                        WeaponKind::Knife,
+                    )
+                {
+                    hits.wounded(target, &hurt, pos - slam, pos, WeaponKind::Knife);
+                }
+            }
+        }
+        if zombie.leap.busy() {
+            zombie.swing = None;
+            continue;
+        }
+        // A bloater doesn't swing: it bursts (`kinds::bursts`).
+        if zombie.kind == BLOATER {
+            if in_reach(k.reach).is_some()
+                && let Some(hurt) = hits.hurt(entity, entity, f32::MAX, false, WeaponKind::Grenade)
+            {
+                hits.wounded(entity, &hurt, Vec3::Y, at, WeaponKind::Grenade);
+            }
+            continue;
+        }
         match zombie.swing {
             Some(t) => {
                 let t = t + dt;
@@ -442,6 +593,44 @@ mod tests {
         }
         let late: Vec<u8> = (0..500).map(|_| pick_kind(12, &mut rng)).collect();
         assert!(late.contains(&BRUTE) && late.contains(&RUNNER));
+    }
+
+    #[test]
+    fn kinds_join_the_mix_wave_by_wave() {
+        let mut rng = StdRng::seed_from_u64(9);
+        let seen = |n: u16, rng: &mut StdRng| -> Vec<u8> {
+            (0..2000).map(|_| pick_kind(n, rng)).collect()
+        };
+        let w2 = seen(2, &mut rng);
+        assert!(w2.iter().all(|&k| k == WALKER));
+        let w4 = seen(4, &mut rng);
+        assert!(w4.contains(&CRAWLER) && w4.contains(&BLOATER) && !w4.contains(&LEAPER));
+        let w8 = seen(8, &mut rng);
+        assert!(w8.contains(&LEAPER) && !w8.contains(&BRUTE));
+    }
+
+    #[test]
+    fn a_wave_is_its_size_with_crawlers_in_packs() {
+        let mut rng = StdRng::seed_from_u64(4);
+        for n in [3, 6, 12, 30] {
+            let size = 3 + 2 * (n as usize - 1);
+            let queue = fill_wave(n, size, &mut rng);
+            assert_eq!(queue.len(), size);
+        }
+        // Over many waves, crawlers come in runs of four (or fewer at the
+        // end of a wave).
+        let queue = fill_wave(20, 4000, &mut rng);
+        let mut run = 0;
+        for (i, &k) in queue.iter().enumerate() {
+            if k == CRAWLER {
+                run += 1;
+            }
+            let ends = queue.get(i + 1) != Some(&CRAWLER);
+            if k == CRAWLER && ends {
+                assert_eq!(run % PACK, 0, "a pack of {run} at {i}");
+                run = 0;
+            }
+        }
     }
 
     #[test]

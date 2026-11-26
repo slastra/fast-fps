@@ -60,11 +60,7 @@ fn dress_mob(
     };
     let grey = Color::srgb(0.45, 0.45, 0.45);
     let look = looks.0.get(&mob.kind).copied().unwrap_or(MobLook {
-        look: Look {
-            body: grey,
-            trim: grey.darker(0.14),
-            glow: Color::WHITE,
-        },
+        look: Look::new(grey, grey.darker(0.14), Color::WHITE),
         gun: false,
     });
     let rig = rig::spawn_with(

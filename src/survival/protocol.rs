@@ -44,6 +44,9 @@ pub enum Phase {
 pub const WALKER: u8 = 1;
 pub const RUNNER: u8 = 2;
 pub const BRUTE: u8 = 3;
+pub const CRAWLER: u8 = 4;
+pub const BLOATER: u8 = 5;
+pub const LEAPER: u8 = 6;
 
 /// `Mob::flags` on a zombie, for drawing what's happening to it.
 pub const BURNING: u8 = 1;
@@ -108,4 +111,6 @@ pub enum Flash {
     Dust { at: Vec3 },
     /// Someone healed.
     Heal { at: Vec3 },
+    /// A bloater burst: gas hanging there for a while.
+    Gas { at: Vec3, radius: f32, secs: f32 },
 }

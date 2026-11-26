@@ -13,7 +13,7 @@ mod builder;
 pub mod dummy;
 pub mod lights;
 
-pub use arena::{DUMMIES, SPAWNS};
+pub use arena::{BREACH_SIZE, Breach, DUMMIES, SPAWNS, breach};
 
 use bevy::prelude::*;
 

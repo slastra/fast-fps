@@ -44,7 +44,7 @@ impl Bone {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum Paint {
     Team,
     TeamDark,
@@ -52,6 +52,8 @@ pub enum Paint {
     Boot,
     /// The glowing visor.
     Glow,
+    /// Bone and claw.
+    Pale,
 }
 
 pub struct BoxDef {
@@ -246,13 +248,60 @@ pub fn player_color(owner: u64) -> Color {
     Color::hsl(hue, 0.65, 0.5)
 }
 
-/// How a body is painted: its main color, the darker trim, and the glow
-/// of the visor (or eyes).
+/// How a body is painted and shaped: its main color, the darker trim, the
+/// glow of the visor or eyes, and for a mob, parts it lacks or adds.
 #[derive(Clone, Copy, Debug)]
 pub struct Look {
     pub body: Color,
     pub trim: Color,
     pub glow: Color,
+    pub eyes: Eyes,
+    /// Bones drawn without their boxes (a crawler's legs). The bones are
+    /// still there, so the skeleton and ragdoll work the same.
+    pub hide: &'static [Bone],
+    /// Boxes added to bones (a bloater's belly).
+    pub extras: &'static [Extra],
+}
+
+impl Look {
+    /// Painted these colors, shaped like a player.
+    pub const fn new(body: Color, trim: Color, glow: Color) -> Self {
+        Self {
+            body,
+            trim,
+            glow,
+            eyes: Eyes::Visor,
+            hide: &[],
+            extras: &[],
+        }
+    }
+}
+
+/// What glows on the face.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Eyes {
+    /// A players' visor: one bar.
+    Visor,
+    /// Two close dots.
+    Dots,
+}
+
+/// A box added to a bone, in the bone's frame.
+#[derive(Clone, Copy, Debug)]
+pub struct Extra {
+    pub bone: Bone,
+    pub size: [f32; 3],
+    pub center: [f32; 3],
+    pub paint: Paint,
+}
+
+pub const fn extra(bone: Bone, size: [f32; 3], center: [f32; 3], paint: Paint) -> Extra {
+    Extra {
+        bone,
+        size,
+        center,
+        paint,
+    }
 }
 
 /// Meshes and materials that bodies of one kind share (mobs of a kind all
@@ -273,11 +322,7 @@ pub fn spawn(
     materials: &mut Assets<StandardMaterial>,
 ) -> AvatarRig {
     let team = player_color(owner);
-    let look = Look {
-        body: team,
-        trim: team.darker(0.14),
-        glow: team,
-    };
+    let look = Look::new(team, team.darker(0.14), team);
     spawn_with(commands, player, owner, look, true, meshes, materials, None)
 }
 
@@ -337,10 +382,27 @@ pub fn spawn_with(
             .id();
         bones[def.bone.index()] = joint;
 
-        for b in def.boxes {
-            let size = Vec3::from(b.size);
-            let center = Vec3::from(b.center);
-            let is_glow = matches!(b.paint, Paint::Glow);
+        // This bone's boxes, as the look shapes them.
+        let mut boxes: Vec<(Vec3, Vec3, Paint)> = Vec::new();
+        if !look.hide.contains(&def.bone) {
+            for b in def.boxes {
+                let (size, center) = (Vec3::from(b.size), Vec3::from(b.center));
+                if matches!(b.paint, Paint::Glow) && look.eyes == Eyes::Dots {
+                    for side in [-1.0, 1.0] {
+                        let dot = Vec3::new(0.065 * side, 0.01, 0.0);
+                        boxes.push((Vec3::new(0.06, 0.06, 0.04), center + dot, Paint::Glow));
+                    }
+                } else {
+                    boxes.push((size, center, b.paint));
+                }
+            }
+        }
+        for e in look.extras.iter().filter(|e| e.bone == def.bone) {
+            boxes.push((Vec3::from(e.size), Vec3::from(e.center), e.paint));
+        }
+
+        for (size, center, paint) in boxes {
+            let is_glow = matches!(paint, Paint::Glow);
             let reuse = shared
                 .as_ref()
                 .and_then(|s| s.meshes.get(box_index).cloned());
@@ -348,11 +410,12 @@ pub fn spawn_with(
                 let mesh = reuse.unwrap_or_else(|| meshes.add(Cuboid::from_size(size)));
                 (mesh, glow.clone())
             } else {
-                let color = match b.paint {
+                let color = match paint {
                     Paint::Team => team,
                     Paint::TeamDark => look.trim,
                     Paint::Dark => Color::srgb(0.09, 0.09, 0.11),
                     Paint::Boot | Paint::Glow => Color::srgb(0.04, 0.04, 0.05),
+                    Paint::Pale => Color::srgb(0.81, 0.78, 0.69),
                 };
                 let mesh = reuse
                     .unwrap_or_else(|| meshes.add(lowpoly::block(size, color, 0.08, &mut rng)));

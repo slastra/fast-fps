@@ -114,7 +114,8 @@ fn spawn_local_player(mut commands: Commands) {
             LocalPlayer,
             PlayerInput,
             CharacterController {
-                filter: SpatialQueryFilter::from_mask(Layer::World),
+                // Barriers too: an open breach in the wall stops only you.
+                filter: SpatialQueryFilter::from_mask([Layer::World, Layer::Barrier]),
                 speed: RUN_SPEED,
                 crouch_speed_scale: CROUCH_SPEED_SCALE,
                 jump_height: JUMP_HEIGHT,
@@ -123,7 +124,7 @@ fn spawn_local_player(mut commands: Commands) {
             },
             RigidBody::Kinematic,
             Collider::cylinder(0.4, 1.8),
-            CollisionLayers::new(Layer::LocalBody, Layer::World),
+            CollisionLayers::new(Layer::LocalBody, [Layer::World, Layer::Barrier]),
             Mass(90.0),
             Transform::from_translation(start),
         ))

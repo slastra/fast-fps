@@ -50,7 +50,7 @@ commands run at startup.
 | Command | |
 |---|---|
 | `give_card <name>` | Take a card now, if it could be offered (`give_card Twin Belt`). |
-| `zombie [walker\|runner\|brute] [x z]` | A zombie now, 6 m in front of you or at x z, going for the nearest player. |
+| `zombie [walker\|runner\|brute\|crawler\|bloater\|leaper] [x z]` | A zombie now, 6 m in front of you or at x z, going for the nearest player. |
 | `next_wave` | End the breather now. |
 | `end_wave` | Clear the wave's zombies now. |
 

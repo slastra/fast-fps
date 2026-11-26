@@ -86,6 +86,11 @@ pub fn spawn(
     let mut parts = Vec::new();
     let mut joints = Vec::new();
     for (i, def) in SKELETON.iter().enumerate() {
+        // A bone drawn with nothing (a crawler's legs) gets no body: posed
+        // where nobody sees, it could start inside the ground and be flung.
+        if !rig.parts.iter().any(|p| p.bone == def.bone) {
+            continue;
+        }
         let (pos, rot) = frames[i];
         let main = &def.boxes[0];
         let size = Vec3::from(main.size);
@@ -135,6 +140,9 @@ pub fn spawn(
 
         let Some(parent) = def.parent else { continue };
         let parent = bodies[parent.index()];
+        if parent == Entity::PLACEHOLDER {
+            continue;
+        }
         let anchor = Vec3::from(def.offset);
         let joint = match def.joint {
             JointKind::Root => continue,

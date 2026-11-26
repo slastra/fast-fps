@@ -18,6 +18,7 @@ mod downed;
 mod draft;
 mod drops;
 mod effects;
+mod kinds;
 mod status;
 mod waves;
 mod zombies;
@@ -43,7 +44,7 @@ use crate::{
     weapon::WeaponKind,
 };
 use waves::{Cue, Seen};
-use zombies::{Spawner, Zombie, pick_kind};
+use zombies::{Spawner, Zombie, fill_wave, spawn_zombie};
 
 pub(super) fn plugin(app: &mut App) {
     let authority = in_state(ClientState::Disconnected);
@@ -67,8 +68,11 @@ pub(super) fn plugin(app: &mut App) {
             Update,
             (
                 zombies::spawn,
+                kinds::leap,
                 zombies::steer,
                 zombies::attack,
+                kinds::bursts,
+                kinds::gas,
                 status::tick,
                 effects::on_hit,
                 effects::on_boom,
@@ -91,6 +95,7 @@ pub(super) fn plugin(app: &mut App) {
         );
     downed::plugin(app);
     draft::plugin(app);
+    crate::survival::cracks::add_breaches(app);
     app.console_command(
         "give_card",
         "<card>",
@@ -98,7 +103,7 @@ pub(super) fn plugin(app: &mut App) {
     )
     .console_command(
         "zombie",
-        "<walker|runner|brute> [x z]",
+        "<walker|runner|brute|crawler|bloater|leaper> [x z]",
         "survival: a zombie now, going for the nearest player (host)",
     )
     .console_command("next_wave", "", "survival: end the breather now (host)")
@@ -133,7 +138,7 @@ type Gear = (
 fn start_or_stop(
     mut changes: MessageReader<ModeChange>,
     runs: Query<Entity, With<Survival>>,
-    zombies: Query<Entity, With<Zombie>>,
+    zombies: Query<Entity, Or<(With<Zombie>, With<kinds::Gas>)>>,
     pickups: Query<Entity, With<Pickup>>,
     players: Query<Entity, With<Player>>,
     mut rules: ResMut<Rules>,
@@ -257,9 +262,7 @@ fn run(
         Some(Cue::Wave(n)) => {
             let mut rng = rand::rng();
             spawner.wave = n;
-            spawner.queue = (0..waves::wave_size(n))
-                .map(|_| pick_kind(n, &mut rng))
-                .collect();
+            spawner.queue = fill_wave(n, waves::wave_size(n) as usize, &mut rng);
             spawner.timer = 0.5;
             let open = waves::cracks_open(n, CRACKS.len());
             run.cracks = (1u16 << open) - 1;
@@ -543,6 +546,9 @@ fn test_commands(
                     Some("walker") | None => crate::survival::protocol::WALKER,
                     Some("runner") => crate::survival::protocol::RUNNER,
                     Some("brute") => crate::survival::protocol::BRUTE,
+                    Some("crawler") => crate::survival::protocol::CRAWLER,
+                    Some("bloater") => crate::survival::protocol::BLOATER,
+                    Some("leaper") => crate::survival::protocol::LEAPER,
                     Some(other) => {
                         print.write(Print::error(format!("no zombie called '{other}'")));
                         continue;
@@ -566,7 +572,7 @@ fn test_commands(
                 let wave = runs.single().map_or(1, |r| r.0.wave.max(1));
                 let yaw = at.x.atan2(at.z);
                 // Past the end of its route, so it goes for the nearest player.
-                commands.spawn(zombies::zombie(id, wave, 0, usize::MAX, at, yaw));
+                spawn_zombie(&mut commands, id, wave, 0, usize::MAX, at, yaw);
             }
             _ => {}
         }

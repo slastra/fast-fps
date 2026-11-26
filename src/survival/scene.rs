@@ -12,7 +12,7 @@ use super::{
     cracks::CRACKS,
     protocol::{BURNING, CHILLED, FROZEN, Flash, Pickup, PickupKind},
 };
-use crate::{net::Mob, render::no_shadow};
+use crate::{net::Mob, render::no_shadow, world::BREACH_SIZE};
 
 pub(super) fn plugin(app: &mut App) {
     app.init_resource::<Flashes>()
@@ -28,8 +28,8 @@ struct SceneAssets {
     ball: Handle<Mesh>,
     disc: Handle<Mesh>,
     ring: Handle<Mesh>,
-    crack: Handle<StandardMaterial>,
-    rubble: Handle<StandardMaterial>,
+    stone: Handle<StandardMaterial>,
+    stone_dark: Handle<StandardMaterial>,
     ammo: Handle<StandardMaterial>,
     ammo_band: Handle<StandardMaterial>,
     med: Handle<StandardMaterial>,
@@ -42,6 +42,7 @@ struct SceneAssets {
     fire: Handle<StandardMaterial>,
     dust: Handle<StandardMaterial>,
     heal: Handle<StandardMaterial>,
+    gas: Handle<StandardMaterial>,
 }
 
 fn glowing(color: Color, glow: LinearRgba, alpha: f32) -> StandardMaterial {
@@ -70,8 +71,9 @@ fn make_assets(
             ..default()
         })
     };
-    let crack = lit(Color::srgb(0.02, 0.02, 0.02));
-    let rubble = lit(Color::srgb(0.62, 0.60, 0.56));
+    // The wall's own stone (`world/builder.rs`).
+    let stone = lit(Color::srgb(0.36, 0.36, 0.4));
+    let stone_dark = lit(Color::srgb(0.25, 0.25, 0.3));
     let ammo = lit(Color::srgb(0.30, 0.34, 0.18));
     let ammo_band = lit(Color::srgb(0.85, 0.68, 0.18));
     let med = lit(Color::srgb(0.92, 0.92, 0.90));
@@ -81,8 +83,8 @@ fn make_assets(
         ball: meshes.add(Sphere::new(0.5).mesh().ico(2).unwrap()),
         disc: meshes.add(Cylinder::new(0.5, 0.04)),
         ring: meshes.add(Torus::new(0.38, 0.5)),
-        crack,
-        rubble,
+        stone,
+        stone_dark,
         ammo,
         ammo_band,
         med,
@@ -122,6 +124,11 @@ fn make_assets(
             LinearRgba::BLACK,
             0.7,
         )),
+        gas: materials.add(glowing(
+            Color::srgb(0.6, 0.85, 0.3),
+            LinearRgba::rgb(0.25, 0.5, 0.08),
+            0.2,
+        )),
         heal: materials.add(glowing(
             Color::srgb(0.4, 1.0, 0.5),
             LinearRgba::rgb(0.8, 4.0, 1.0),
@@ -135,14 +142,18 @@ fn make_assets(
 #[derive(Component)]
 struct CrackMark(usize);
 
-/// A jagged dark split in the wall's inner face, man-height, with rubble at
-/// its foot. Built once for each crack; a cosmetic rng, so it can't move
-/// anything.
+/// An opened breach: the plug is gone (`cracks::BreachPlugin`), and this
+/// dresses the hole. Broken stones jut into it on both faces of the wall,
+/// and rubble lies on both sides. Built once for
+/// each crack; a cosmetic rng, so it can't move anything.
 fn make_cracks(mut commands: Commands, assets: Res<SceneAssets>) {
+    // The crack's own frame: x along the wall, y up, z inward. The inner face
+    // is z = 0 and the outer face z = -WALL.
+    const WALL: f32 = 1.4;
+    let (w, h) = (BREACH_SIZE.x, BREACH_SIZE.y);
     for (i, crack) in CRACKS.iter().enumerate() {
         let mut rng = StdRng::seed_from_u64(0x5eed + i as u64);
-        let inward = Vec3::new(crack.inward.x, 0.0, crack.inward.y);
-        let base = Vec3::new(crack.at.x, 0.0, crack.at.y) + inward * 0.02;
+        let base = Vec3::new(crack.at.x, 0.0, crack.at.y);
         let facing = Quat::from_rotation_y(crack.inward.x.atan2(crack.inward.y));
         commands
             .spawn((
@@ -152,71 +163,76 @@ fn make_cracks(mut commands: Commands, assets: Res<SceneAssets>) {
                 Visibility::Hidden,
             ))
             .with_children(|c| {
-                // The opening: a stack of dark slabs, wider in the middle,
-                // each a little off center and tilted.
-                // Behind each, a pale chipped rim, so it reads from afar.
-                let rows = 9;
-                for r in 0..rows {
-                    let t = r as f32 / (rows - 1) as f32;
-                    let width = 0.3 + 1.0 * (std::f32::consts::PI * t).sin();
-                    let y = 0.12 + t * 2.5;
-                    let x = rng.random_range(-0.15..0.15);
-                    let tilt = rng.random_range(-0.35..0.35);
-                    // The wall's footing (0.6 m high) stands 0.15 m proud.
-                    let face = if y < 0.6 { 0.19 } else { 0.04 };
-                    let at = Transform::from_xyz(x, y, face)
-                        .with_rotation(Quat::from_rotation_z(tilt))
-                        .with_scale(Vec3::new(width, 0.4, 0.04));
-                    c.spawn((
-                        Mesh3d(assets.cube.clone()),
-                        MeshMaterial3d(assets.crack.clone()),
-                        at,
-                        no_shadow(),
-                    ));
-                    let mut rim = at;
-                    rim.translation.z = face - 0.025;
-                    rim.scale = Vec3::new(width + 0.22, 0.52, 0.03);
-                    c.spawn((
-                        Mesh3d(assets.cube.clone()),
-                        MeshMaterial3d(assets.rubble.clone()),
-                        rim,
-                        no_shadow(),
-                    ));
+                let stone =
+                    |c: &mut ChildSpawnerCommands, at: Vec3, size: Vec3, tilt: f32, dark: bool| {
+                        c.spawn((
+                            Mesh3d(assets.cube.clone()),
+                            MeshMaterial3d(if dark {
+                                assets.stone_dark.clone()
+                            } else {
+                                assets.stone.clone()
+                            }),
+                            Transform::from_translation(at)
+                                .with_rotation(Quat::from_rotation_z(tilt))
+                                .with_scale(size),
+                        ));
+                    };
+                // Broken edges: stones jutting into the hole along its sides
+                // and top, on both faces, so it isn't a clean rectangle.
+                for face in [0.08, -WALL - 0.08] {
+                    for side in [-1.0, 1.0] {
+                        let mut y = rng.random_range(0.05..0.3);
+                        while y < h - 0.1 {
+                            let size = Vec3::new(
+                                rng.random_range(0.18..0.42),
+                                rng.random_range(0.16..0.4),
+                                rng.random_range(0.16..0.3),
+                            );
+                            let x = side * (w / 2.0 - rng.random_range(0.02..0.16));
+                            stone(
+                                c,
+                                Vec3::new(x, y + size.y / 2.0, face),
+                                size,
+                                rng.random_range(-0.4..0.4),
+                                rng.random_bool(0.4),
+                            );
+                            y += size.y * rng.random_range(0.7..1.1);
+                        }
+                    }
+                    let mut x = -w / 2.0;
+                    while x < w / 2.0 {
+                        let size = Vec3::new(
+                            rng.random_range(0.2..0.45),
+                            rng.random_range(0.14..0.34),
+                            rng.random_range(0.16..0.3),
+                        );
+                        let y = h - size.y / 2.0 + rng.random_range(-0.12..0.06);
+                        stone(
+                            c,
+                            Vec3::new(x + size.x / 2.0, y, face),
+                            size,
+                            rng.random_range(-0.35..0.35),
+                            rng.random_bool(0.4),
+                        );
+                        x += size.x * rng.random_range(0.6..0.95);
+                    }
                 }
-                // Hairline splits running off it.
-                for _ in 0..5 {
-                    let y = rng.random_range(0.8..2.4);
-                    let side: f32 = if rng.random_bool(0.5) { 1.0 } else { -1.0 };
-                    let len = rng.random_range(0.5..1.2);
-                    let angle: f32 = rng.random_range(-0.7..0.7);
-                    c.spawn((
-                        Mesh3d(assets.cube.clone()),
-                        MeshMaterial3d(assets.crack.clone()),
-                        Transform::from_xyz(side * (0.55 + len / 2.0 * angle.cos()), y, 0.02)
-                            .with_rotation(Quat::from_rotation_z(angle))
-                            .with_scale(Vec3::new(len, 0.05, 0.012)),
-                        no_shadow(),
-                    ));
-                }
-                // Rubble at its foot.
-                for _ in 0..6 {
-                    let s = rng.random_range(0.12..0.3);
-                    c.spawn((
-                        Mesh3d(assets.cube.clone()),
-                        MeshMaterial3d(assets.rubble.clone()),
-                        Transform::from_xyz(
-                            rng.random_range(-0.9..0.9),
-                            s * 0.4,
-                            rng.random_range(0.35..0.9),
-                        )
-                        .with_rotation(Quat::from_euler(
-                            EulerRot::XYZ,
+                // Rubble on both sides of the wall.
+                for (z0, z1) in [(0.2, 1.4), (-WALL - 1.2, -WALL - 0.2)] {
+                    for _ in 0..7 {
+                        let s = rng.random_range(0.12..0.34);
+                        stone(
+                            c,
+                            Vec3::new(
+                                rng.random_range(-1.3..1.3),
+                                s * 0.35,
+                                rng.random_range(z0..z1),
+                            ),
+                            Vec3::splat(s),
                             rng.random_range(0.0..1.0),
-                            rng.random_range(0.0..3.0),
-                            rng.random_range(0.0..1.0),
-                        ))
-                        .with_scale(Vec3::splat(s)),
-                    ));
+                            rng.random_bool(0.5),
+                        );
+                    }
                 }
             });
     }
@@ -366,6 +382,7 @@ pub struct Flashes {
     pub bursts: u32,
     pub fires: u32,
     pub heals: u32,
+    pub gases: u32,
 }
 
 /// Something brief: it changes size from `from` to `to` over its life,
@@ -403,6 +420,7 @@ fn flashes(
             Flash::Burst { .. } => count.bursts += 1,
             Flash::Fire { .. } => count.fires += 1,
             Flash::Heal { .. } => count.heals += 1,
+            Flash::Gas { .. } => count.gases += 1,
             Flash::Dust { .. } => {}
         }
         match *flash {
@@ -458,6 +476,32 @@ fn flashes(
                             .with_scale(Vec3::splat(s)),
                         puff,
                         no_shadow(),
+                    ));
+                }
+            }
+            Flash::Gas { at, radius, secs } => {
+                // A cloud of puffs that swell, drift up and thin out.
+                for i in 0..10 {
+                    let angle =
+                        i as f32 / 10.0 * std::f32::consts::TAU + rng.random_range(-0.3..0.3);
+                    let out = Vec3::new(angle.cos(), 0.0, angle.sin())
+                        * rng.random_range(0.2..radius * 0.75);
+                    let size = rng.random_range(0.6..1.1);
+                    let mut puff = fx(
+                        secs * rng.random_range(0.75..1.0),
+                        Vec3::splat(size * 0.5),
+                        Vec3::splat(size * 1.4),
+                    );
+                    puff.rise = Vec3::Y * rng.random_range(0.05..0.25) + out * 0.05;
+                    commands.spawn((
+                        Mesh3d(assets.ball.clone()),
+                        MeshMaterial3d(assets.gas.clone()),
+                        Transform::from_translation(
+                            at + out + Vec3::Y * rng.random_range(-0.5..0.4),
+                        )
+                        .with_scale(Vec3::splat(size * 0.5)),
+                        puff,
+                        NotShadowCaster,
                     ));
                 }
             }

@@ -17,4 +17,7 @@ pub enum Layer {
     Ragdoll,
     /// Grenades in flight: bounce off the world only.
     Projectile,
+    /// Stops the local player and nothing else: an opened breach in the
+    /// outer wall, which zombies and shots go through.
+    Barrier,
 }

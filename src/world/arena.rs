@@ -24,6 +24,52 @@ use crate::{
 /// Half the width of the playable square.
 pub const ARENA: f32 = 36.0;
 
+/// The outer wall: how thick it is, and the segments it's built from.
+const WALL_THICKNESS: f32 = 1.4;
+const WALL_SEGMENTS: usize = 19;
+const WALL_SEG: f32 = (ARENA * 2.0 + WALL_THICKNESS * 2.0) / WALL_SEGMENTS as f32;
+
+/// Breaches in the outer wall, as (side, segment): holes the level always
+/// has, bricked up. A game mode can open them (survival's cracks, in
+/// `survival/cracks.rs`, open them in this order). Sides: 0 north (-z),
+/// 1 south (+z), 2 west (-x), 3 east (+x).
+pub const BREACHES: [(usize, usize); 12] = [
+    (0, 10),
+    (1, 8),
+    (0, 8),
+    (1, 10),
+    (3, 15),
+    (1, 7),
+    (0, 11),
+    (2, 15),
+    (3, 14),
+    (2, 14),
+    (2, 11),
+    (3, 10),
+];
+/// How wide and high a breach is.
+pub const BREACH_SIZE: Vec2 = Vec2::new(1.7, 2.4);
+
+/// Where breach `i` is on the wall's inner face (x, z), and which way is
+/// inward.
+pub const fn breach(i: usize) -> (Vec2, Vec2) {
+    let (side, seg) = BREACHES[i];
+    let along = -WALL_SEG * WALL_SEGMENTS as f32 / 2.0 + WALL_SEG * (seg as f32 + 0.5);
+    match side {
+        0 => (Vec2::new(along, -ARENA), Vec2::new(0.0, 1.0)),
+        1 => (Vec2::new(along, ARENA), Vec2::new(0.0, -1.0)),
+        2 => (Vec2::new(-ARENA, along), Vec2::new(1.0, 0.0)),
+        _ => (Vec2::new(ARENA, along), Vec2::new(-1.0, 0.0)),
+    }
+}
+
+/// The block filling breach `i`, and its collider: both carry this. Open,
+/// the block is hidden and the collider only stops the local player
+/// (`Layer::Barrier`), so zombies, bullets and grenades go through but
+/// nobody walks out of the arena.
+#[derive(Component)]
+pub struct Breach(pub usize);
+
 /// Collider-center heights for respawning.
 pub const SPAWNS: [Vec3; 8] = [
     Vec3::new(-15.0, 1.2, -19.0),
@@ -357,10 +403,10 @@ fn ground_cover(b: &mut Builder) {
 }
 
 fn perimeter(b: &mut Builder) {
-    let thickness = 1.4;
+    let thickness = WALL_THICKNESS;
     let span = ARENA * 2.0 + thickness * 2.0;
-    let segments = 19;
-    let seg = span / segments as f32;
+    let segments = WALL_SEGMENTS;
+    let seg = WALL_SEG;
     let edge = ARENA + thickness / 2.0;
     for side in 0..4 {
         for i in 0..segments {
@@ -388,19 +434,79 @@ fn perimeter(b: &mut Builder) {
             } else {
                 STONE
             };
-            b.block(
-                place(along, height / 2.0, 0.0),
-                dims(seg + 0.02, height, thickness),
-                Quat::IDENTITY,
-                color,
-                0.06,
-            );
-            // A wider footing, a capping course, and battlements on top.
-            b.trim(
-                place(along, 0.3, 0.0),
-                dims(seg + 0.02, 0.6, thickness + 0.3),
-                STONE_DARK,
-            );
+            let full = dims(seg + 0.02, height, thickness);
+            let footing = dims(seg + 0.02, 0.6, thickness + 0.3);
+            match BREACHES.iter().position(|&at| at == (side, i)) {
+                None => {
+                    b.block(
+                        place(along, height / 2.0, 0.0),
+                        full,
+                        Quat::IDENTITY,
+                        color,
+                        0.06,
+                    );
+                    // A wider footing.
+                    b.trim(place(along, 0.3, 0.0), footing, STONE_DARK);
+                }
+                Some(n) => {
+                    // Use up the same decoration numbers a whole segment
+                    // would, so the rest of the map looks the same.
+                    lowpoly::block(full, color, 0.06, &mut b.paint);
+                    lowpoly::block(footing, STONE_DARK, 0.07, &mut b.paint);
+                    let paint = StdRng::seed_from_u64(0xb4ea_c400 + n as u64);
+                    let saved = std::mem::replace(&mut b.paint, paint);
+                    // Two piers and a lintel around the hole.
+                    let (w, h) = (BREACH_SIZE.x, BREACH_SIZE.y);
+                    let pier = (seg + 0.02 - w) / 2.0;
+                    for s in [-1.0, 1.0] {
+                        let a = along + s * (w + pier) / 2.0;
+                        let size = dims(pier, height, thickness);
+                        b.block(
+                            place(a, height / 2.0, 0.0),
+                            size,
+                            Quat::IDENTITY,
+                            color,
+                            0.06,
+                        );
+                        b.trim(
+                            place(a, 0.3, 0.0),
+                            dims(pier, 0.6, thickness + 0.3),
+                            STONE_DARK,
+                        );
+                    }
+                    b.block(
+                        place(along, h + (height - h) / 2.0, 0.0),
+                        dims(w, height - h, thickness),
+                        Quat::IDENTITY,
+                        color,
+                        0.06,
+                    );
+                    // The plug: rougher, darker stone set a little back.
+                    let center = place(along, h / 2.0, 0.0);
+                    let mesh =
+                        lowpoly::block(dims(w, h, thickness - 0.24), STONE_DARK, 0.1, &mut b.paint);
+                    let handle = b.meshes.add(mesh);
+                    b.commands.spawn((
+                        Name::new("Breach plug"),
+                        Breach(n),
+                        Mesh3d(handle),
+                        MeshMaterial3d(b.material.clone()),
+                        Transform::from_translation(center),
+                    ));
+                    let size = dims(w, h, thickness);
+                    b.commands.spawn((
+                        Name::new("Breach plug collider"),
+                        Breach(n),
+                        RigidBody::Static,
+                        Collider::cuboid(size.x, size.y, size.z),
+                        CollisionLayers::new(Layer::World, LayerMask::ALL),
+                        Transform::from_translation(center),
+                    ));
+                    b.taken.push(Footprint::new(center, size, 0.0));
+                    b.paint = saved;
+                }
+            }
+            // A capping course, and battlements on top.
             b.trim(
                 place(along, height - 0.1, 0.0),
                 dims(seg + 0.02, 0.2, thickness + 0.16),

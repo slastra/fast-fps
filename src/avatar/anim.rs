@@ -48,6 +48,8 @@ pub struct AvatarAnim {
     /// 1 with both arms reaching forward (a mob), and 1 mid-swing.
     pub reach: f32,
     pub swing: f32,
+    /// 1 flat on the ground, pulling along with the arms (a crawling mob).
+    pub crawl: f32,
     /// Aim pitch in radians, positive up.
     pub pitch: f32,
     /// 1 right after a shot, decaying to 0.
@@ -78,6 +80,7 @@ impl Default for AvatarAnim {
             down: 0.0,
             reach: 0.0,
             swing: 0.0,
+            crawl: 0.0,
             pitch: 0.0,
             recoil: 0.0,
             flinch: Vec2::ZERO,
@@ -130,6 +133,7 @@ pub fn advance(
         a.down.smooth_nudge(&flag(Pose::DOWN), 6.0, dt);
         a.reach.smooth_nudge(&flag(Pose::REACH), 10.0, dt);
         a.swing.smooth_nudge(&flag(Pose::SWING), 14.0, dt);
+        a.crawl.smooth_nudge(&flag(Pose::CRAWL), 8.0, dt);
 
         let speed = Vec2::new(a.vel.x, a.vel.z).length();
         a.phase = (a.phase + stride_freq(speed) * smoothstep(0.1, 0.6, speed) * dt).fract();
@@ -252,17 +256,26 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
     // --- Hips ------------------------------------------------------------
     // Lowest when the feet are furthest apart, twice per cycle.
     let bob = -(0.012 + 0.03 * gait) * moving * (2.0 * cycle).cos();
-    let hips_pos = Vec3::new(
+    let upright = Vec3::new(
         0.0,
         Bone::Hips.offset().y - CROUCH_DROP * a.crouch - 0.04 * gait * ground + bob - 0.14 * a.land
             + 0.004 * breathe
             - KNEEL_DROP * a.down,
         0.05 * a.crouch,
     );
+    // Crawling: the hips drag on the ground, set back so the body (which
+    // lies forward from them) is centered.
+    let crawl = smoothstep(0.0, 1.0, a.crawl);
+    let prone = Vec3::new(
+        0.0,
+        FEET_Y + 0.2 + 0.02 * (2.0 * cycle).cos() * moving,
+        0.32,
+    );
+    let hips_pos = upright.lerp(prone, crawl);
     // Swing the hip of the leading leg forward.
     let twist = 0.1 * moving * cycle.cos() * dir.z;
-    let hips_rot = Quat::from_rotation_y(twist)
-        * Quat::from_rotation_x(-0.1 * forward * ground)
+    let hips_rot = Quat::from_rotation_y(twist * (1.0 + crawl))
+        * Quat::from_rotation_x(-0.1 * forward * ground - 1.42 * crawl)
         * Quat::from_rotation_z(-0.08 * sideways * ground);
     bones[Bone::Hips.index()] = Transform {
         translation: hips_pos,
@@ -361,6 +374,24 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
         (
             left_hand.lerp(out(-1.0, Bone::UpperArmL), reach),
             right_hand.lerp(out(1.0, Bone::UpperArmR), reach),
+        )
+    } else {
+        (left_hand, right_hand)
+    };
+    // Crawling: hands planted ahead in turn, each pulling back along the
+    // ground and lifting to reach forward again; a swing lunges them up.
+    let (left_hand, right_hand) = if crawl > 0.0 {
+        let pull = |side: f32, offset: f32| {
+            let (sin, cos) = (cycle + offset).sin_cos();
+            Vec3::new(
+                side * 0.24,
+                FEET_Y + 0.05 + 0.1 * moving * cos.max(0.0) + 0.35 * a.swing,
+                -0.42 - 0.18 * moving * sin - 0.12 * a.swing,
+            )
+        };
+        (
+            left_hand.lerp(pull(-1.0, 0.0), crawl),
+            right_hand.lerp(pull(1.0, PI), crawl),
         )
     } else {
         (left_hand, right_hand)
@@ -474,7 +505,8 @@ mod tests {
                 }
             }
         }
-        // A mob reaching and swinging, and someone kneeling (downed).
+        // A mob reaching and swinging, or crawling, and someone kneeling
+        // (downed).
         let extra: Vec<AvatarAnim> = out
             .iter()
             .step_by(7)
@@ -482,6 +514,7 @@ mod tests {
                 reach: 1.0,
                 swing: if a.phase > 0.3 { 1.0 } else { 0.0 },
                 down: if a.crouch > 0.5 { 1.0 } else { 0.0 },
+                crawl: if a.pitch == 0.0 { 1.0 } else { 0.0 },
                 weapon: a.weapon,
                 vel: a.vel,
                 pitch: a.pitch,
@@ -492,6 +525,30 @@ mod tests {
             .collect();
         out.extend(extra);
         out
+    }
+
+    #[test]
+    fn a_crawler_lies_low_with_its_hands_on_the_ground() {
+        for phase in [0.0, 0.25, 0.5, 0.75] {
+            let anim = AvatarAnim {
+                crawl: 1.0,
+                reach: 1.0,
+                vel: Vec3::new(0.0, 0.0, -3.4),
+                phase,
+                ..default()
+            };
+            let g = globals(&compute(&anim));
+            let head = g[Bone::Head.index()].0;
+            // Head low and forward of the hips.
+            assert!(head.y < FEET_Y + 0.75, "{head:?}");
+            assert!(head.z < g[Bone::Hips.index()].0.z - 0.3);
+            // Each hand (the end of the forearm) near the ground, ahead.
+            for fore in [Bone::ForearmL, Bone::ForearmR] {
+                let (pos, rot) = g[fore.index()];
+                let hand = pos + rot * Vec3::new(0.0, -ARM.1, 0.0);
+                assert!(hand.y < FEET_Y + 0.3, "{fore:?} {hand:?}");
+            }
+        }
     }
 
     #[test]

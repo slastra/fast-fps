@@ -94,6 +94,11 @@ separate mesh in every view it draws. Colliders stay separate. If something must
 entity (it moves, or you want to find it in a query), use `b.single` and give it its own
 collider.
 
+The outer wall has twelve bricked-up breaches (`BREACHES` in `arena.rs`): each segment is built
+as two piers and a lintel around a hole, filled by a plug carrying a `Breach` marker. Survival
+opens them as its cracks (`survival/cracks.rs`). Moving a breach moves a crack: keep them on a
+segment's center, and check the crack's route still reaches the keep.
+
 New shapes go in `src/lowpoly.rs`: build a mesh, color it with `facet` or `block`, and add a
 builder helper that spawns it with a collider.
 

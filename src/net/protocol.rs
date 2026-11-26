@@ -101,7 +101,8 @@ pub struct Pose {
     pub pitch: f32,
     /// World-space velocity, used to animate the body.
     pub vel: Vec3,
-    /// `Pose::CROUCH`, `AIR`, `RELOAD`, `HOLSTER`, `DOWN`, `REACH`, `SWING`.
+    /// `Pose::CROUCH`, `AIR`, `RELOAD`, `HOLSTER`, `DOWN`, `REACH`, `SWING`,
+    /// `CRAWL`.
     pub flags: u8,
 }
 
@@ -117,6 +118,8 @@ impl Pose {
     pub const REACH: u8 = 32;
     /// Swinging at someone (a mob's attack).
     pub const SWING: u8 = 64;
+    /// Flat on the ground, pulling along with the arms (a mob).
+    pub const CRAWL: u8 = 128;
 
     pub fn has(&self, flag: u8) -> bool {
         self.flags & flag != 0

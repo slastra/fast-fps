@@ -2,20 +2,38 @@
 //! each one leads to the keep. Shared by the server (where zombies spawn and
 //! walk) and every player's machine (where cracks are drawn).
 //!
+//! A crack is one of the level's bricked-up breaches (`BREACHES` in
+//! `world/arena.rs`), opened: [`BreachPlugin`] hides its plug and lets
+//! zombies, shots and grenades through, while still stopping players.
+//! Zombies come from outside the wall and climb in through the hole.
+//!
 //! The map's middle is the walled keep (`world/arena.rs`), with doors on the
 //! north, south and east sides and a solid west wall, so every route ends at
 //! a door. The points were checked against the map's fixed pieces: none runs
 //! through a pillar, ramp or platform. Random rocks and trees may still be in
 //! the way, which the zombies' steering handles.
 
-use bevy::math::{Vec2, Vec3};
+use avian3d::prelude::*;
+use bevy::prelude::*;
+
+use super::protocol::Survival;
+use crate::{
+    physics::Layer,
+    world::{Breach, breach},
+};
 
 /// One crack: where it is on the wall's inner face, which way is inward,
-/// and the points a zombie walks through to reach the keep.
+/// and the points a zombie walks through to reach the keep, after climbing
+/// in (see [`waypoint`]).
 pub struct Crack {
     pub at: Vec2,
     pub inward: Vec2,
     pub route: &'static [Vec2],
+}
+
+const fn crack(i: usize, route: &'static [Vec2]) -> Crack {
+    let (at, inward) = breach(i);
+    Crack { at, inward, route }
 }
 
 const fn v(x: f32, z: f32) -> Vec2 {
@@ -63,74 +81,90 @@ pub fn way_to(from: Vec2, to: Vec2) -> Vec2 {
 
 /// In the order they open: the four beside the north and south doors first.
 pub const CRACKS: [Crack; 12] = [
-    Crack {
-        at: v(3.94, -36.0),
-        inward: v(0.0, 1.0),
-        route: &[v(3.94, -32.0), NORTH[0], NORTH[1]],
-    },
-    Crack {
-        at: v(-3.94, 36.0),
-        inward: v(0.0, -1.0),
-        route: &[v(-3.94, 32.0), SOUTH[0], SOUTH[1]],
-    },
-    Crack {
-        at: v(-3.94, -36.0),
-        inward: v(0.0, 1.0),
-        route: &[v(-3.94, -32.0), NORTH[0], NORTH[1]],
-    },
-    Crack {
-        at: v(3.94, 36.0),
-        inward: v(0.0, -1.0),
-        route: &[v(3.94, 32.0), v(2.5, 20.0), SOUTH[0], SOUTH[1]],
-    },
-    Crack {
-        at: v(36.0, 23.62),
-        inward: v(-1.0, 0.0),
-        route: &[v(32.0, 23.62), v(10.0, 4.0), EAST[0], EAST[1]],
-    },
-    Crack {
-        at: v(-9.84, 36.0),
-        inward: v(0.0, -1.0),
-        route: &[v(-9.84, 32.0), v(-2.0, 11.0), SOUTH[0], SOUTH[1]],
-    },
-    Crack {
-        at: v(9.84, -36.0),
-        inward: v(0.0, 1.0),
-        route: &[v(9.84, -32.0), v(2.0, -11.0), NORTH[0], NORTH[1]],
-    },
-    Crack {
-        at: v(-36.0, 23.62),
-        inward: v(1.0, 0.0),
-        route: &[v(-32.0, 23.62), v(-8.0, 9.5), SOUTH[0], SOUTH[1]],
-    },
-    Crack {
-        at: v(36.0, 19.68),
-        inward: v(-1.0, 0.0),
-        route: &[v(32.0, 19.68), v(10.0, 3.0), EAST[0], EAST[1]],
-    },
-    Crack {
-        at: v(-36.0, 19.68),
-        inward: v(1.0, 0.0),
-        route: &[v(-32.0, 19.68), v(-8.0, 9.5), SOUTH[0], SOUTH[1]],
-    },
-    Crack {
-        at: v(-36.0, 9.84),
-        inward: v(1.0, 0.0),
-        route: &[v(-32.0, 9.84), v(-8.0, 10.0), SOUTH[0], SOUTH[1]],
-    },
-    Crack {
-        at: v(36.0, 1.97),
-        inward: v(-1.0, 0.0),
-        route: &[v(32.0, 1.97), EAST[0], EAST[1]],
-    },
+    crack(0, &[NORTH[0], NORTH[1]]),
+    crack(1, &[SOUTH[0], SOUTH[1]]),
+    crack(2, &[NORTH[0], NORTH[1]]),
+    crack(3, &[v(2.5, 20.0), SOUTH[0], SOUTH[1]]),
+    crack(4, &[v(10.0, 4.0), EAST[0], EAST[1]]),
+    crack(5, &[v(-2.0, 11.0), SOUTH[0], SOUTH[1]]),
+    crack(6, &[v(2.0, -11.0), NORTH[0], NORTH[1]]),
+    crack(7, &[v(-8.0, 9.5), SOUTH[0], SOUTH[1]]),
+    crack(8, &[v(10.0, 3.0), EAST[0], EAST[1]]),
+    crack(9, &[v(-8.0, 9.5), SOUTH[0], SOUTH[1]]),
+    crack(10, &[v(-8.0, 10.0), SOUTH[0], SOUTH[1]]),
+    crack(11, &[EAST[0], EAST[1]]),
 ];
 
-/// Where a zombie stands as it comes through crack `i`: just inside the
-/// wall, on the ground (collider-center height).
+/// How many points a zombie from crack `i` walks through.
+pub fn route_len(i: usize) -> usize {
+    CRACKS[i].route.len() + 1
+}
+
+/// Point `n` of crack `i`'s way to the keep: first 4 m straight in through
+/// the hole, then its route.
+pub fn waypoint(i: usize, n: usize) -> Vec2 {
+    let c = &CRACKS[i];
+    if n == 0 {
+        c.at + c.inward * 4.0
+    } else {
+        c.route[n - 1]
+    }
+}
+
+/// Where a zombie stands as it arrives at crack `i`: outside the wall,
+/// in front of the hole, on the ground (collider-center height).
 pub fn entry(i: usize) -> Vec3 {
     let c = &CRACKS[i];
-    let p = c.at + c.inward * 0.8;
+    let p = c.at - c.inward * 2.0;
     Vec3::new(p.x, 0.9, p.y)
+}
+
+/// Opens and closes the breaches to match the run's open cracks, on every
+/// machine (the server needs it for shots, each player for walking).
+pub struct BreachPlugin;
+
+impl Plugin for BreachPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, open_breaches);
+    }
+}
+
+/// Add [`BreachPlugin`] unless it's there already (a host has both the
+/// server's and the player's survival plugins).
+pub fn add_breaches(app: &mut App) {
+    if !app.is_plugin_added::<BreachPlugin>() {
+        app.add_plugins(BreachPlugin);
+    }
+}
+
+fn open_breaches(
+    runs: Query<&Survival>,
+    mut plugs: Query<(Entity, &Breach, Option<&mut Visibility>, Has<Collider>)>,
+    mut shown: Local<u16>,
+    mut commands: Commands,
+) {
+    let open = runs.single().map_or(0, |r| r.cracks);
+    if open == *shown {
+        return;
+    }
+    *shown = open;
+    for (entity, breach, visibility, collider) in &mut plugs {
+        let is_open = open & (1 << breach.0) != 0;
+        if let Some(mut visibility) = visibility {
+            visibility.set_if_neq(if is_open {
+                Visibility::Hidden
+            } else {
+                Visibility::Inherited
+            });
+        }
+        if collider {
+            commands.entity(entity).insert(if is_open {
+                CollisionLayers::new(Layer::Barrier, Layer::LocalBody)
+            } else {
+                CollisionLayers::new(Layer::World, LayerMask::ALL)
+            });
+        }
+    }
 }
 
 #[cfg(test)]
@@ -159,6 +193,19 @@ mod tests {
             // A step inward heads toward the middle.
             assert!((c.at + c.inward).length() < c.at.length());
             assert!(c.route.len() >= 2);
+        }
+    }
+
+    #[test]
+    fn zombies_climb_straight_in_through_the_hole() {
+        for (i, c) in CRACKS.iter().enumerate() {
+            let from = entry(i);
+            let from = Vec2::new(from.x, from.z);
+            let to = waypoint(i, 0);
+            // Outside the wall, then inside, on one line through the hole.
+            assert!(from.length() > c.at.length() && to.length() < c.at.length());
+            let across = (to - from).normalize().perp_dot(c.at - from).abs();
+            assert!(across < 0.01, "crack {i}");
         }
     }
 

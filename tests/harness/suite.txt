@@ -24,3 +24,4 @@ tests/harness/survival.cfg
 -t 200 tests/harness/survival_down.cfg
 tests/harness/survival_cards.cfg
 tests/harness/survival_coop_host.cfg tests/harness/survival_coop_client.cfg
+tests/harness/survival_kinds.cfg
