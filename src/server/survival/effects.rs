@@ -13,11 +13,11 @@ use rand::Rng;
 
 use super::{Vigor, status::Status, zombies::Zombie};
 use crate::{
-    net::{Dead, Health, Player, Pose},
+    net::{Dead, Health, Player, Pose, to_all},
     server::combat::{Blast, Boom, HitLanded, Hits, blast},
     survival::{
         cards::{Ammo, Build, Combo, Perk},
-        protocol::{Fallen, Flash, Upgrades},
+        protocol::{Fallen, Flash},
     },
     weapon::{Class, WeaponKind},
 };
@@ -54,7 +54,7 @@ struct Extra {
 pub fn on_hit(
     // `Hits` writes `HitLanded` too, so the two take turns.
     mut io: ParamSet<(MessageReader<HitLanded>, Hits)>,
-    attackers: Query<&Upgrades>,
+    attackers: Query<&Build>,
     vigor: Query<&Vigor>,
     mut zombies: Query<(&mut Status, &mut Zombie), Without<Dead>>,
     near: Query<(Entity, &Pose), (With<Zombie>, Without<Dead>)>,
@@ -72,10 +72,9 @@ pub fn on_hit(
     let mut blasts: Vec<(Blast, bool)> = Vec::new();
     let mut heals: Vec<(Entity, f32)> = Vec::new();
     for h in &landed {
-        let Ok(upgrades) = attackers.get(h.attacker) else {
+        let Ok(build) = attackers.get(h.attacker) else {
             continue;
         };
-        let build = Build::from_cards(&upgrades.0);
         // Butcher: a knife kill heals.
         if h.weapon == WeaponKind::Knife && h.killed && build.has(Perk::Butcher) {
             heals.push((h.attacker, 15.0));
@@ -106,13 +105,10 @@ pub fn on_hit(
                 amount: h.amount * 0.6,
                 weapon: h.weapon,
             });
-            flash.write(ToClients {
-                targets: SendTargets::All,
-                message: Flash::Burst {
-                    at: target_at,
-                    radius: 0.8,
-                },
-            });
+            flash.write(to_all(Flash::Burst {
+                at: target_at,
+                radius: 0.8,
+            }));
         }
         let was_frozen = status.frozen();
         if build.loaded(Ammo::Incendiary) {
@@ -139,13 +135,10 @@ pub fn on_hit(
                     amount: (h.amount * 0.35).max(6.0),
                     weapon: h.weapon,
                 });
-                flash.write(ToClients {
-                    targets: SendTargets::All,
-                    message: Flash::Arc {
-                        from: target_at,
-                        to: at + Vec3::Y * 0.3,
-                    },
-                });
+                flash.write(to_all(Flash::Arc {
+                    from: target_at,
+                    to: at + Vec3::Y * 0.3,
+                }));
             }
         }
         if build.loaded(Ammo::Explosive) && once {
@@ -169,14 +162,11 @@ pub fn on_hit(
                     left: 4.0,
                     tick: 0.0,
                 });
-                flash.write(ToClients {
-                    targets: SendTargets::All,
-                    message: Flash::Fire {
-                        at: target_at,
-                        radius: 2.0,
-                        secs: 4.0,
-                    },
-                });
+                flash.write(to_all(Flash::Fire {
+                    at: target_at,
+                    radius: 2.0,
+                    secs: 4.0,
+                }));
             }
         }
         if build.loaded(Ammo::Leech) {
@@ -209,10 +199,7 @@ pub fn on_hit(
     let targets: Vec<(Entity, Vec3)> = near.iter().map(|(e, p)| (e, p.pos)).collect();
     for (b, blood) in blasts {
         let (at, radius, by) = (b.at, b.radius, b.attacker);
-        flash.write(ToClients {
-            targets: SendTargets::All,
-            message: Flash::Burst { at, radius },
-        });
+        flash.write(to_all(Flash::Burst { at, radius }));
         blast(&spatial, &mut hits, &targets, b);
         // Blood Bomb: the blast heals teammates caught in it.
         if blood {
@@ -241,7 +228,7 @@ pub fn on_hit(
 /// caught in a grenade's blast.
 pub fn on_boom(
     mut booms: MessageReader<Boom>,
-    attackers: Query<&Upgrades>,
+    attackers: Query<&Build>,
     mut allies: Query<(&Pose, &mut Health, &Vigor), (With<Player>, Without<Fallen>)>,
     mut commands: Commands,
 ) {
@@ -250,10 +237,9 @@ pub fn on_boom(
         if boom.tag == SECONDARY || boom.weapon != WeaponKind::Grenade {
             continue;
         }
-        let Ok(upgrades) = attackers.get(boom.attacker) else {
+        let Ok(build) = attackers.get(boom.attacker) else {
             continue;
         };
-        let build = Build::from_cards(&upgrades.0);
         if build.has(Perk::Cluster) {
             for i in 0..3 {
                 let angle = i as f32 * std::f32::consts::TAU / 3.0 + rng.random_range(-0.5..0.5);
@@ -312,13 +298,10 @@ pub fn fires(
             continue;
         }
         commands.entity(entity).despawn();
-        flash.write(ToClients {
-            targets: SendTargets::All,
-            message: Flash::Burst {
-                at: bomblet.at,
-                radius: 2.5,
-            },
-        });
+        flash.write(to_all(Flash::Burst {
+            at: bomblet.at,
+            radius: 2.5,
+        }));
         blast(
             &spatial,
             &mut hits,

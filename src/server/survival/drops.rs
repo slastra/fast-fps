@@ -15,7 +15,7 @@ use crate::{
     server::rules::Died,
     survival::{
         cards::{Build, Perk},
-        protocol::{Fallen, Pickup, PickupKind, Upgrades},
+        protocol::{Fallen, Pickup, PickupKind},
     },
 };
 
@@ -45,7 +45,7 @@ pub fn roll(build: Option<&Build>, rng: &mut impl Rng) -> Option<PickupKind> {
 pub fn drop(
     mut deaths: MessageReader<Died>,
     zombies: Query<&Pose, With<Zombie>>,
-    killers: Query<&Upgrades>,
+    killers: Query<&Build>,
     mut commands: Commands,
 ) {
     let mut rng = rand::rng();
@@ -53,11 +53,7 @@ pub fn drop(
         let Ok(pose) = zombies.get(died.victim) else {
             continue;
         };
-        let build = killers
-            .get(died.killer)
-            .ok()
-            .map(|u| Build::from_cards(&u.0));
-        let Some(kind) = roll(build.as_ref(), &mut rng) else {
+        let Some(kind) = roll(killers.get(died.killer).ok(), &mut rng) else {
             continue;
         };
         let pos = Vec3::new(pose.pos.x, pose.pos.y - 0.75, pose.pos.z);
@@ -77,7 +73,7 @@ pub fn collect(
     time: Res<Time>,
     mut pickups: Query<(Entity, &Pickup, &mut Lifetime)>,
     mut players: Query<
-        (&Pose, &Upgrades, &mut Kit, &WeaponMods, &mut Health, &Vigor),
+        (&Pose, &Build, &mut Kit, &WeaponMods, &mut Health, &Vigor),
         (With<Player>, Without<Fallen>, Without<Out>),
     >,
     mut commands: Commands,
@@ -91,12 +87,12 @@ pub fn collect(
         let taker = players
             .iter_mut()
             .find(|p| p.0.pos.distance(pickup.pos + Vec3::Y * 0.9) < SURVIVAL_PICKUP_RANGE);
-        let Some((_, upgrades, mut kit, mods, mut health, vigor)) = taker else {
+        let Some((_, build, mut kit, mods, mut health, vigor)) = taker else {
             continue;
         };
         match pickup.kind {
             PickupKind::Ammo => {
-                let bandolier = Build::from_cards(&upgrades.0).has(Perk::Bandolier);
+                let bandolier = build.has(Perk::Bandolier);
                 resupply(&mut kit, mods, if bandolier { 1.5 } else { 1.0 });
             }
             PickupKind::Medkit => {

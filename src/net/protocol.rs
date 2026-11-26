@@ -63,6 +63,14 @@ pub fn protocol_text(hash: &ProtocolHash) -> String {
 /// Commands only whoever runs the game may use: the host on a LAN, or the
 /// player who created a game on a dedicated server (`server/admin.rs`).
 /// A client sends them to the server as an [`AdminCommand`].
+/// A server message for every player.
+pub fn to_all<T>(message: T) -> ToClients<T> {
+    ToClients {
+        targets: SendTargets::All,
+        message,
+    }
+}
+
 pub const ADMIN_COMMANDS: [&str; 4] = ["mode", "bot", "bot_do", "bot_duel_aim"];
 
 /// Client -> server: a console line from [`ADMIN_COMMANDS`], to run there.

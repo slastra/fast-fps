@@ -21,7 +21,7 @@ use super::{
     zombies::{Zombie, can_see, ground, kind},
 };
 use crate::{
-    net::{Dead, Out, Player, Pose},
+    net::{Dead, Out, Player, Pose, to_all},
     physics::Layer,
     server::{
         combat::{Blast, Hits, blast},
@@ -171,10 +171,7 @@ pub fn leap(
                 } else {
                     next.y = ground(&spatial, &walls, next).unwrap_or(to.y);
                     zombie.slam = Some(next);
-                    flash.write(ToClients {
-                        targets: SendTargets::All,
-                        message: Flash::Dust { at: next },
-                    });
+                    flash.write(to_all(Flash::Dust { at: next }));
                     Leap::Land { t: 0.0 }
                 }
             }
@@ -260,14 +257,11 @@ pub fn bursts(
             bloater: died.victim,
             killer,
         });
-        flash.write(ToClients {
-            targets: SendTargets::All,
-            message: Flash::Gas {
-                at,
-                radius: GAS_RADIUS,
-                secs: GAS_SECS,
-            },
-        });
+        flash.write(to_all(Flash::Gas {
+            at,
+            radius: GAS_RADIUS,
+            secs: GAS_SECS,
+        }));
     }
 }
 

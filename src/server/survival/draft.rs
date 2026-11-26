@@ -34,6 +34,7 @@ pub fn offers(
     mut breathers: MessageReader<Breather>,
     mut waves: MessageReader<WaveBegun>,
     mut players: Query<(
+        &Build,
         &mut Upgrades,
         &mut Offer,
         &mut Kit,
@@ -44,15 +45,13 @@ pub fn offers(
 ) {
     let mut rng = rand::rng();
     for Breather(wave) in breathers.read() {
-        for (upgrades, mut offered, mut kit, ..) in &mut players {
-            let build = Build::from_cards(&upgrades.0);
-            offered.0 = offer(&build, *wave, &mut rng);
-            let mods = super::mods_of(&build);
-            resupply(&mut kit, &mods, 1.0);
+        for (build, _, mut offered, mut kit, _, mods, _) in &mut players {
+            offered.0 = offer(build, *wave, &mut rng);
+            resupply(&mut kit, mods, 1.0);
         }
     }
     if waves.read().count() > 0 {
-        for (mut upgrades, mut offered, mut kit, mut health, mods, vigor) in &mut players {
+        for (_, mut upgrades, mut offered, mut kit, mut health, mods, vigor) in &mut players {
             if offered.0.is_empty() {
                 continue;
             }

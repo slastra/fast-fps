@@ -13,7 +13,7 @@ use crate::{
     config::{
         SURVIVAL_BLEED_SECS, SURVIVAL_REVIVE_HEALTH, SURVIVAL_REVIVE_RANGE, SURVIVAL_REVIVE_SECS,
     },
-    net::{Feed, Health, Out, Player, PlayerName, Pose, Respawn},
+    net::{Feed, Health, Out, Player, PlayerName, Pose, Respawn, to_all},
     server::{
         bots::Bot,
         players::{PlayerClient, find_player, place},
@@ -21,7 +21,7 @@ use crate::{
     },
     survival::{
         cards::{Build, Perk},
-        protocol::{Fallen, Flash, Revive, Upgrades},
+        protocol::{Fallen, Flash, Revive},
     },
 };
 
@@ -59,18 +59,17 @@ pub struct Holding(HashSet<Entity>);
 #[allow(clippy::type_complexity)]
 pub fn fall(
     mut deaths: MessageReader<Died>,
-    players: Query<(&Upgrades, Has<Fallen>, Has<Out>, Has<WindUsed>), With<Player>>,
+    players: Query<(&Build, Has<Fallen>, Has<Out>, Has<WindUsed>), With<Player>>,
     mut healths: Query<&mut Health>,
     mut commands: Commands,
 ) {
     for died in deaths.read() {
-        let Ok((upgrades, fallen, out, wind_used)) = players.get(died.victim) else {
+        let Ok((build, fallen, out, wind_used)) = players.get(died.victim) else {
             continue;
         };
         if fallen || out {
             continue;
         }
-        let build = Build::from_cards(&upgrades.0);
         if let Ok(mut health) = healths.get_mut(died.victim) {
             health.0 = 1.0;
         }
@@ -110,7 +109,7 @@ pub fn revive(
     mut messages: MessageReader<FromClient<Revive>>,
     clients: Query<(Entity, &PlayerClient)>,
     mut holding: ResMut<Holding>,
-    rescuers: Query<(Entity, &Pose, &Upgrades), (With<Player>, Without<Fallen>, Without<Out>)>,
+    rescuers: Query<(Entity, &Pose, &Build), (With<Player>, Without<Fallen>, Without<Out>)>,
     mut fallen: Query<(Entity, &Pose, &mut Bleed, &mut Health, Option<&mut RiseIn>)>,
     mut commands: Commands,
     mut flash: MessageWriter<ToClients<Flash>>,
@@ -130,10 +129,7 @@ pub fn revive(
             rise.0 -= dt;
             if rise.0 <= 0.0 {
                 stand_up(&mut commands, entity, &mut health, SECOND_WIND_HEALTH);
-                flash.write(ToClients {
-                    targets: SendTargets::All,
-                    message: Flash::Heal { at: pose.pos },
-                });
+                flash.write(to_all(Flash::Heal { at: pose.pos }));
                 continue;
             }
         }
@@ -141,16 +137,13 @@ pub fn revive(
             holding.0.contains(r) && at.pos.distance(pose.pos) < SURVIVAL_REVIVE_RANGE
         });
         match helper {
-            Some((_, _, upgrades)) => {
-                let rally = Build::from_cards(&upgrades.0).has(Perk::Rally);
+            Some((_, _, build)) => {
+                let rally = build.has(Perk::Rally);
                 bleed.revive += dt * if rally { 2.0 } else { 1.0 };
                 if bleed.revive >= SURVIVAL_REVIVE_SECS {
                     let hp = if rally { 70.0 } else { SURVIVAL_REVIVE_HEALTH };
                     stand_up(&mut commands, entity, &mut health, hp);
-                    flash.write(ToClients {
-                        targets: SendTargets::All,
-                        message: Flash::Heal { at: pose.pos },
-                    });
+                    flash.write(to_all(Flash::Heal { at: pose.pos }));
                 }
             }
             None => bleed.revive = (bleed.revive - dt).max(0.0),
@@ -176,10 +169,7 @@ pub fn bleed(
                 .entity(entity)
                 .remove::<(Fallen, Bleed, RiseIn, Disarmed)>()
                 .insert(Out);
-            feed.write(ToClients {
-                targets: SendTargets::All,
-                message: Feed::Note(format!("{} bled out", name.0)),
-            });
+            feed.write(to_all(Feed::Note(format!("{} bled out", name.0))));
             continue;
         }
         let now = Fallen {
@@ -230,13 +220,13 @@ pub fn return_fallen(
 pub fn medics(
     time: Res<Time>,
     mut players: Query<
-        (Entity, &Pose, &Upgrades, &Vigor, &mut Health),
+        (Entity, &Pose, &Build, &Vigor, &mut Health),
         (With<Player>, Without<Fallen>, Without<Out>),
     >,
 ) {
     let medics: Vec<(Entity, Vec3)> = players
         .iter()
-        .filter(|p| Build::from_cards(&p.2.0).has(Perk::Medic))
+        .filter(|p| p.2.has(Perk::Medic))
         .map(|p| (p.0, p.1.pos))
         .collect();
     if medics.is_empty() {

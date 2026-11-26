@@ -7,6 +7,7 @@
 //! card, add it to [`CARDS`] and give its effect a home in [`Build::add`]
 //! (or in `server/survival/effects.rs`, for what happens on a hit).
 
+use bevy::prelude::Component;
 use rand::Rng;
 
 use crate::weapon::WeaponKind;
@@ -363,8 +364,9 @@ pub const CARDS: &[Card] = &[
 /// The guns that have levels (the knife and grenade don't).
 pub const LEVELED: [WeaponKind; 6] = [W::Glock, W::Mp5, W::Shotgun, W::Ak, W::Sniper, W::Flintlock];
 
-/// What a player's cards add up to.
-#[derive(Clone, Debug, Default, PartialEq)]
+/// What a player's cards add up to. On the server it's also a component on
+/// each player, kept in step with their `Upgrades`.
+#[derive(Component, Clone, Debug, Default, PartialEq)]
 pub struct Build {
     /// Weapons owned beyond the starting Glock and knife.
     pub unlocked: Vec<WeaponKind>,

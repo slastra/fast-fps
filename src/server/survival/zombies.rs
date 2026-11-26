@@ -16,7 +16,7 @@ use rand::Rng;
 use super::status::Status;
 use crate::{
     config::{SURVIVAL_MAX_ALIVE, SURVIVAL_SPAWN_SECS},
-    net::{Dead, Health, Mob, Out, Player, PlayerName, Pose},
+    net::{Dead, Health, Mob, Out, Player, PlayerName, Pose, to_all},
     physics::Layer,
     server::{
         combat::Hits,
@@ -252,12 +252,9 @@ pub fn spawn(
     }
     let pos = entry(crack);
     let hole = CRACKS[crack].at;
-    flash.write(ToClients {
-        targets: SendTargets::All,
-        message: Flash::Dust {
-            at: Vec3::new(hole.x, 0.9, hole.y),
-        },
-    });
+    flash.write(to_all(Flash::Dust {
+        at: Vec3::new(hole.x, 0.9, hole.y),
+    }));
     let inward = CRACKS[crack].inward;
     let yaw = (-inward.x).atan2(-inward.y);
     spawn_zombie(&mut commands, id, spawner.wave, crack, 0, pos, yaw);

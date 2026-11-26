@@ -118,7 +118,7 @@ The mode is contained: the rest of the game knows nothing of zombies or cards.
 
 | | |
 |---|---|
-| `src/server/survival/` | The rules: `mod.rs` (the run, the mode switch, what cards do to weapons), `waves.rs` (phases and sizes, unit tested), `zombies.rs` (the kinds, spawning, walking, attacking), `kinds.rs` (the leaper's leap, the bloater's burst and gas), `status.rs` (burning, chill, frozen), `effects.rs` (ammo, combos, perks on a hit), `downed.rs`, `drops.rs`, `draft.rs` |
+| `src/server/survival/` | The rules: `mod.rs` (the run, the mode switch), `loadout.rs` (what a player's cards give them: weapons, rounds, mods, and the `Build` the other systems read), `commands.rs` (the test commands), `waves.rs` (phases and sizes, unit tested), `zombies.rs` (the kinds, spawning, walking, attacking), `kinds.rs` (the leaper's leap, the bloater's burst and gas), `status.rs` (burning, chill, frozen), `effects.rs` (ammo, combos, perks on a hit), `downed.rs`, `drops.rs`, `draft.rs` |
 | `src/survival/` | Shared and client: `cards.rs` (the card table and what a hand adds up to, unit tested), `cracks.rs` (which breaches the cracks are, the routes, the doors, opening breaches), `protocol.rs` (wire types), `looks.rs` (each kind's colors, parts and eyes), `sounds.rs` (what plays when), `hud.rs`, `scene.rs` (broken breaches, pickups, auras, flashes, gas), `mod.rs` (keys, limits, probe) |
 | `src/config.rs` | `SURVIVAL_*`: wave size, breather lengths, drop rates, bleed-out, revive |
 
@@ -136,8 +136,8 @@ dummies, player ragdolls), `ModeChange` and `Died`, `Kit` (owned weapons and fin
    `Combo` if it pairs with one).
 2. Say when it may be offered in `Build::eligible`.
 3. Make it do something: what it changes about weapons goes in `mods_of`
-   (`src/server/survival/mod.rs`); what happens on a hit goes in `effects.rs`; anything else
-   reads `Build::has` where it applies (`downed.rs` for Rally, `drops.rs` for Scavenger).
+   (`src/server/survival/loadout.rs`); what happens on a hit goes in `effects.rs`; anything else
+   reads the player's `Build` where it applies (`downed.rs` for Rally, `drops.rs` for Scavenger).
 4. Try it with `give_card`, and add a part to `tests/harness/survival_cards.cfg`.
 
 ## What the tests can't tell you
