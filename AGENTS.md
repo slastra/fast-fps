@@ -46,6 +46,8 @@ scripts/new-game.sh ~/Projects/Rust/my-game   # start a new game from this one
 | The shapes things are built from (blocks, crates, trees) | `src/lowpoly.rs` |
 | What gets sent over the network | `src/net/protocol.rs` |
 | Game rules: damage, kills, respawns | `src/server/` |
+| Game modes and their hooks (`mode`, `Rules`, `Died`) | `src/server/rules.rs`, `docs/recipes.md` |
+| Survival: waves, zombies, cards, combos | `src/server/survival/`, `src/survival/`, `docs/survival.md` |
 | How other players look and move | `src/avatar/` |
 | Keys and mouse | `src/player/input.rs` |
 | The HUD | `src/hud/` |

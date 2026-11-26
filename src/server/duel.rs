@@ -7,7 +7,7 @@
 //!    their marks ([`DUEL_MARKS`]).
 //! 2. **Steady**: both are on their marks. If either steps off, back to Walk.
 //! 3. **Draw**: after a random moment, fire! Shots before this are ignored.
-//! 4. **RoundOver**: the first kill wins the round (see `Hits::hurt`).
+//! 4. **RoundOver**: the first kill wins the round (see `fallen`).
 //!
 //! The first to [`Duel::WINS`] rounds wins the duel. The winner stays, the
 //! loser goes to the back of the line, and the next player steps up.
@@ -25,23 +25,131 @@ use crate::{
         DUEL_MARK_RADIUS, DUEL_MARKS, DUEL_OVER_SECS, DUEL_ROUND_OVER_SECS, DUEL_ROUND_SECS,
         DUEL_START, DUEL_STEADY_SECS, DUEL_WATCH, MAX_HEALTH,
     },
-    console::{ConsoleAppExt, ConsoleCommand, Print},
-    net::{Duel, DuelPhase, Feed, Health, Out, Player, Pose, Respawn, Score},
+    net::{Duel, DuelPhase, Feed, Health, Kit, Out, Player, Pose, Respawn},
     server::{
         bots::Bot,
-        players::{Joined, PlayerClient, pick_spawn, respawn_at},
+        players::{Joined, PlayerClient, place},
+        rules::{Died, Disarmed, GameModeAppExt, ModeChange, ModeSwitch, Rules, Unstuck},
     },
+    weapon::WeaponKind,
 };
 
 pub(super) fn plugin(app: &mut App) {
     let authority = in_state(ClientState::Disconnected);
-    app.add_systems(Update, mode_command)
-        .add_systems(Update, run_duel.run_if(authority));
-    app.console_command(
-        "mode",
-        "[ffa|duel]",
-        "the game mode: free-for-all or a flintlock duel (host or offline)",
+    app.game_mode("duel").add_systems(
+        Update,
+        (start_or_stop, run_duel, arm, fallen, unstuck)
+            .chain()
+            .after(ModeSwitch)
+            .run_if(authority),
     );
+}
+
+/// `mode duel` starts a duel; any other mode ends it.
+fn start_or_stop(
+    mut changes: MessageReader<ModeChange>,
+    duels: Query<Entity, With<Duel>>,
+    mut rules: ResMut<Rules>,
+    mut feed: MessageWriter<ToClients<Feed>>,
+    mut commands: Commands,
+) {
+    for change in changes.read() {
+        for entity in &duels {
+            commands.entity(entity).despawn();
+        }
+        if change.to != "duel" {
+            continue;
+        }
+        // The fallen stay down until the next round; `fallen` below.
+        rules.respawn = false;
+        commands.spawn((
+            Replicated,
+            Duel {
+                phase: DuelPhase::Waiting,
+                duelists: [0, 0],
+                wins: [0, 0],
+                round: 0,
+                on_mark: [false, false],
+                queue: Vec::new(),
+            },
+            DuelClock::default(),
+        ));
+        feed.write(ToClients {
+            targets: SendTargets::All,
+            message: Feed::Note(format!(
+                "Duel! Walk to your mark, wait for the bell, first to {}",
+                Duel::WINS
+            )),
+        });
+    }
+}
+
+/// A duel is the flintlock only, and duelists can't fire before "Draw!".
+fn arm(
+    duels: Query<&Duel>,
+    players: Query<(Entity, &Player, Option<&Kit>, Has<Disarmed>)>,
+    mut commands: Commands,
+) {
+    let Ok(duel) = duels.single() else {
+        return;
+    };
+    let flintlock = Kit::only(&[WeaponKind::Flintlock]);
+    for (entity, player, kit, disarmed) in &players {
+        if kit != Some(&flintlock) {
+            commands.entity(entity).insert(flintlock.clone());
+        }
+        let may_fire = duel.phase == DuelPhase::Draw && duel.slot(player.owner).is_some();
+        if may_fire && disarmed {
+            commands.entity(entity).remove::<Disarmed>();
+        } else if !may_fire && !disarmed {
+            commands.entity(entity).insert(Disarmed);
+        }
+    }
+}
+
+/// A duelist who falls is out for the rest of the round, and the other
+/// wins it.
+fn fallen(
+    mut deaths: MessageReader<Died>,
+    mut duels: Query<(&mut Duel, &mut DuelClock)>,
+    owners: Query<&Player>,
+    mut commands: Commands,
+) {
+    let Ok((mut duel, mut clock)) = duels.single_mut() else {
+        deaths.clear();
+        return;
+    };
+    for died in deaths.read() {
+        let Some(slot) = owners
+            .get(died.victim)
+            .ok()
+            .and_then(|p| duel.slot(p.owner))
+        else {
+            continue;
+        };
+        commands.entity(died.victim).insert(Out);
+        record_loss(&mut duel, &mut clock.0, slot);
+    }
+}
+
+/// `kill` or a fall in a duel puts you back where you belong this round.
+fn unstuck(
+    mut requests: MessageReader<Unstuck>,
+    duels: Query<&Duel>,
+    mut players: Query<(&Player, Option<&PlayerClient>, Option<&mut Bot>)>,
+    mut respawns: MessageWriter<ToClients<Respawn>>,
+) {
+    let Ok(duel) = duels.single() else {
+        requests.clear();
+        return;
+    };
+    for Unstuck(entity) in requests.read() {
+        let Ok((player, client, bot)) = players.get_mut(*entity) else {
+            continue;
+        };
+        let spot = duel.slot(player.owner).map_or_else(watch_spot, start_spot);
+        place(client, bot, spot, &mut respawns);
+    }
 }
 
 /// Server-only, beside [`Duel`]: seconds left in the current phase.
@@ -186,22 +294,6 @@ pub fn record_loss(duel: &mut Duel, clock: &mut f32, slot: usize) {
     *clock = DUEL_ROUND_OVER_SECS;
 }
 
-/// Put a player somewhere: a real player is told where to respawn, a bot is
-/// simply moved.
-fn place(
-    client: Option<&PlayerClient>,
-    bot: Option<Mut<Bot>>,
-    (pos, yaw): (Vec3, f32),
-    respawns: &mut MessageWriter<ToClients<Respawn>>,
-) {
-    if let Some(client) = client {
-        respawn_at(client.0, pos, yaw, respawns);
-    }
-    if let Some(mut bot) = bot {
-        bot.place(pos, yaw);
-    }
-}
-
 #[allow(clippy::type_complexity)]
 fn run_duel(
     time: Res<Time>,
@@ -283,87 +375,6 @@ fn run_duel(
 
     if *shared != duel {
         *shared = duel;
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn mode_command(
-    mut cmds: MessageReader<ConsoleCommand>,
-    state: Res<State<ClientState>>,
-    duels: Query<(Entity, &Duel)>,
-    mut players: Query<(
-        Entity,
-        &mut Score,
-        &mut Health,
-        Option<&PlayerClient>,
-        Option<&mut Bot>,
-    )>,
-    mut respawns: MessageWriter<ToClients<Respawn>>,
-    mut feed: MessageWriter<ToClients<Feed>>,
-    mut print: MessageWriter<Print>,
-    mut commands: Commands,
-) {
-    for cmd in cmds.read() {
-        if cmd.name != "mode" {
-            continue;
-        }
-        let current = if duels.is_empty() { "ffa" } else { "duel" };
-        let Some(wanted) = cmd.arg(0) else {
-            print.write(Print(format!("mode: {current}")));
-            continue;
-        };
-        // On a client, `net/admin.rs` sends it to the server instead.
-        if *state.get() != ClientState::Disconnected {
-            continue;
-        }
-        if wanted == current {
-            print.write(Print(format!("already in {current}")));
-            continue;
-        }
-        match wanted {
-            "duel" => {
-                commands.spawn((
-                    Replicated,
-                    Duel {
-                        phase: DuelPhase::Waiting,
-                        duelists: [0, 0],
-                        wins: [0, 0],
-                        round: 0,
-                        on_mark: [false, false],
-                        queue: Vec::new(),
-                    },
-                    DuelClock::default(),
-                ));
-                for (_, mut score, ..) in &mut players {
-                    *score = Score::default();
-                }
-                feed.write(ToClients {
-                    targets: SendTargets::All,
-                    message: Feed::Note(format!(
-                        "Duel! Walk to your mark, wait for the bell, first to {}",
-                        Duel::WINS
-                    )),
-                });
-            }
-            "ffa" => {
-                for (entity, _) in &duels {
-                    commands.entity(entity).despawn();
-                }
-                for (entity, mut score, mut health, client, bot) in &mut players {
-                    *score = Score::default();
-                    health.0 = MAX_HEALTH;
-                    commands.entity(entity).remove::<Out>();
-                    place(client, bot, pick_spawn(), &mut respawns);
-                }
-                feed.write(ToClients {
-                    targets: SendTargets::All,
-                    message: Feed::Note("Free-for-all".into()),
-                });
-            }
-            _ => {
-                print.write(Print::error("usage: mode <ffa|duel>"));
-            }
-        }
     }
 }
 

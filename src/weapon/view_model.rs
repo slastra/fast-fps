@@ -149,7 +149,6 @@ pub fn animate_gun(
 ) {
     let dt = time.delta_secs().max(1e-4);
     let kind = arsenal.current;
-    let def = kind.def();
     let model_rest = super::models::model(kind).rest;
     let moving = (player.0.with_y(0.0).length() / 8.0).clamp(0.0, 1.0);
 
@@ -179,12 +178,14 @@ pub fn animate_gun(
         0.0,
     ) * moving;
     let reload_t = if arsenal.reloading > 0.0 {
-        (((1.0 - arsenal.reloading / def.reload_secs) * std::f32::consts::PI).sin()).max(0.0)
+        (((1.0 - arsenal.reloading / arsenal.reload_secs(kind)) * std::f32::consts::PI).sin())
+            .max(0.0)
     } else {
         0.0
     };
-    let draw_t = if def.draw_secs > 0.0 {
-        arsenal.draw / def.draw_secs
+    let draw_secs = arsenal.draw_secs(kind);
+    let draw_t = if draw_secs > 0.0 {
+        arsenal.draw / draw_secs
     } else {
         0.0
     };

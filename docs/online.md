@@ -46,7 +46,7 @@ your game                       the server (one Docker container)
 
 ```
 games                   list the games
-create duel Fast hands  start a game (ffa or duel, then an optional name) and join it
+create duel Fast hands  start a game (ffa, duel or survival, then an optional name) and join it
 join fast               join by name, or the start of it, or by number
 lobby                   show which lobby the game uses
 lobby <url>             use another one (saved)

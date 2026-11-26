@@ -21,9 +21,10 @@ use crate::{
     physics::Layer,
     player::LocalPlayer,
     server::{
-        combat::{BotShot, Died},
+        combat::BotShot,
         duel::on_mark,
         players::{hitbox, pick_spawn},
+        rules::{Died, Rules},
     },
     weapon::{Class, WeaponKind},
 };
@@ -475,19 +476,15 @@ fn duel_bots(
     }
 }
 
-/// A killed bot starts over at a spawn point, like a player would. In a
-/// duel the duel decides where everyone goes.
-fn respawn(
-    mut deaths: MessageReader<Died>,
-    mut bots: Query<&mut Bot>,
-    duels: Query<(), With<Duel>>,
-) {
-    if !duels.is_empty() {
+/// A killed bot starts over at a spawn point, like a player would, when the
+/// rules respawn the fallen. Otherwise the mode decides where it goes.
+fn respawn(mut deaths: MessageReader<Died>, mut bots: Query<&mut Bot>, rules: Res<Rules>) {
+    if !rules.respawn {
         deaths.clear();
         return;
     }
-    for Died(entity) in deaths.read() {
-        if let Ok(mut bot) = bots.get_mut(*entity) {
+    for died in deaths.read() {
+        if let Ok(mut bot) = bots.get_mut(died.victim) {
             let (pos, yaw) = pick_spawn();
             bot.home = pos;
             bot.yaw = yaw;

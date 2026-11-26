@@ -13,7 +13,7 @@ use super::{
 use crate::{
     config::SHOT_RANGE,
     console::ConsoleCommand,
-    net::{Fire, HitConfirm},
+    net::{Fire, HitConfirm, WeaponMods},
     physics::Layer,
     player::{GameInput, LocalPlayer, ViewRig},
     render::WorldCamera,
@@ -52,7 +52,10 @@ pub fn update_accuracy(
     } else {
         def.stand
     };
-    cone += def.moving * ((speed - 1.5) / 7.5).clamp(0.0, 1.0);
+    // An upgrade can take away the spread from moving.
+    if !WeaponMods::has(arsenal.mods.steady, arsenal.current) {
+        cone += def.moving * ((speed - 1.5) / 7.5).clamp(0.0, 1.0);
+    }
     if state.grounded.is_none() {
         cone += def.airborne;
     }
@@ -103,13 +106,13 @@ pub fn fire(
     }
     let scripted_shot = scripted.primary > 0;
     let held = input.enabled && mouse.pressed(MouseButton::Left);
+    let kind = arsenal.current;
     let want = scripted_shot
-        || if def.automatic {
+        || if arsenal.automatic(kind) {
             held
         } else {
             arsenal.buffered_click > 0.0
         };
-    let kind = arsenal.current;
     // A flintlock's spark is burning down: it fires when it reaches the
     // powder, wherever you are aiming by then.
     let primed = match arsenal.priming {
@@ -154,6 +157,7 @@ pub fn fire(
         }
     }
     arsenal.ammo[kind.index()] -= 1;
+    arsenal.count_shot(kind);
     arsenal.cooldown = def.interval;
     arsenal.flash = 0.05;
     arsenal.since_pump = 0.0;
@@ -167,13 +171,20 @@ pub fn fire(
 
     // Pattern offset for this shot, then random spread per pellet.
     // A duelist who fires before the pistol is all the way up shoots low.
+    // An upgrade can make a spray settle after a few shots.
+    let settle = if WeaponMods::has(arsenal.mods.settle, kind) && arsenal.spray > 5.0 {
+        0.35
+    } else {
+        1.0
+    };
     let (px, py) = def.pattern_at(arsenal.spray);
-    let aim = rig.rotation() * offset(px, py - arsenal.low_deg());
+    let aim = rig.rotation() * offset(px * settle, py * settle - arsenal.low_deg());
     let cone = arsenal.inaccuracy;
-    let mut dirs = Vec::with_capacity(def.pellets as usize);
-    for _ in 0..def.pellets {
+    let pellets = arsenal.pellets(kind);
+    let mut dirs = Vec::with_capacity(pellets as usize);
+    for _ in 0..pellets {
         let mut off = disc(&mut arsenal.rng) * cone;
-        if def.pellets > 1 {
+        if pellets > 1 {
             off += disc(&mut arsenal.rng) * def.pellet_spread;
         }
         dirs.push(aim * offset(off.x, off.y) * Vec3::NEG_Z);
@@ -219,7 +230,7 @@ pub fn fire(
         dirs,
     });
 
-    arsenal.spray = (arsenal.spray + 1.0).min(def.mag as f32);
+    arsenal.spray = (arsenal.spray + 1.0).min(arsenal.mag(kind) as f32);
     arsenal.since_shot = 0.0;
     if def.kick > 0.0 {
         let side = arsenal.rng.random_range(-0.3..0.3);
@@ -244,11 +255,14 @@ pub fn reload(
     if def.class != Class::Gun {
         return;
     }
+    let mag = arsenal.mag(kind);
+    // In a mode that counts ammo, a magazine holds only what's left.
+    let fill = arsenal.rounds_left(kind).map_or(mag, |left| left.min(mag));
     if arsenal.reloading > 0.0 {
         arsenal.reloading -= time.delta_secs();
         if arsenal.reloading <= 0.0 {
             arsenal.reloading = 0.0;
-            arsenal.ammo[kind.index()] = def.mag;
+            arsenal.ammo[kind.index()] = fill;
             play(&mut commands, &sounds.click, 0.6);
         }
         return;
@@ -256,8 +270,8 @@ pub fn reload(
     let empty = arsenal.ammo[kind.index()] == 0;
     let pressed = input.enabled
         && (keys.just_pressed(KeyCode::KeyR) || (empty && mouse.just_pressed(MouseButton::Left)));
-    if (pressed || asked) && arsenal.ammo[kind.index()] < def.mag && arsenal.draw <= 0.0 {
-        arsenal.reloading = def.reload_secs;
+    if (pressed || asked) && arsenal.ammo[kind.index()] < fill && arsenal.draw <= 0.0 {
+        arsenal.reloading = arsenal.reload_secs(kind);
         arsenal.zoom = 0;
         arsenal.spray = 0.0;
         let sound = if kind == WeaponKind::Flintlock {

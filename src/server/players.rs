@@ -9,13 +9,13 @@ use rand::Rng;
 use crate::{
     config::MAX_HEALTH,
     net::{
-        Damaged, Duel, Feed, Health, Loadout, LocalName, MoveInput, Player, PlayerName, Pose,
+        Damaged, Feed, Health, Kit, Loadout, LocalName, MoveInput, Player, PlayerName, Pose,
         Respawn, Score, SelectWeapon, SetName, Suicide,
     },
     physics::Layer,
     server::{
-        combat::Died,
-        duel::{start_spot, watch_spot},
+        bots::Bot,
+        rules::{Died, Rules, Unstuck},
     },
     world::SPAWNS,
 };
@@ -237,11 +237,12 @@ pub fn hitboxes_follow_pose(
 pub fn receive_select(
     mut selects: MessageReader<FromClient<SelectWeapon>>,
     clients: Query<(Entity, &PlayerClient)>,
-    mut loadouts: Query<&mut Loadout>,
+    mut loadouts: Query<(&mut Loadout, Option<&Kit>)>,
 ) {
     for FromClient { client_id, message } in selects.read() {
         if let Some(entity) = find_player(*client_id, &clients)
-            && let Ok(mut loadout) = loadouts.get_mut(entity)
+            && let Ok((mut loadout, kit)) = loadouts.get_mut(entity)
+            && kit.is_none_or(|kit| kit.owns(message.0))
         {
             loadout.set_if_neq(Loadout(message.0));
         }
@@ -252,6 +253,22 @@ pub fn receive_select(
 pub fn respawn(client: ClientId, respawns: &mut MessageWriter<ToClients<Respawn>>) {
     let (pos, yaw) = pick_spawn();
     respawn_at(client, pos, yaw, respawns);
+}
+
+/// Put a player somewhere: a real player is told where to respawn, a bot is
+/// simply moved.
+pub fn place(
+    client: Option<&PlayerClient>,
+    bot: Option<Mut<Bot>>,
+    (pos, yaw): (Vec3, f32),
+    respawns: &mut MessageWriter<ToClients<Respawn>>,
+) {
+    if let Some(client) = client {
+        respawn_at(client.0, pos, yaw, respawns);
+    }
+    if let Some(mut bot) = bot {
+        bot.place(pos, yaw);
+    }
 }
 
 /// Send the client to a chosen spot.
@@ -272,23 +289,21 @@ pub fn receive_suicide(
     mut requests: MessageReader<FromClient<Suicide>>,
     clients: Query<(Entity, &PlayerClient)>,
     mut players: Query<(&mut Health, &mut Score, &PlayerName, &Pose, &Loadout)>,
-    owners: Query<&Player>,
-    duels: Query<&Duel>,
+    rules: Res<Rules>,
     mut respawns: MessageWriter<ToClients<Respawn>>,
     mut feed: MessageWriter<ToClients<Feed>>,
     mut damaged: MessageWriter<ToClients<Damaged>>,
     mut died: MessageWriter<Died>,
+    mut unstuck: MessageWriter<Unstuck>,
 ) {
     for FromClient { client_id, .. } in requests.read() {
         let Some(entity) = find_player(*client_id, &clients) else {
             continue;
         };
-        // In a duel, `kill` (or falling off the world) just puts you back
-        // where you belong this round.
-        if let Ok(duel) = duels.single() {
-            let slot = owners.get(entity).ok().and_then(|p| duel.slot(p.owner));
-            let (pos, yaw) = slot.map_or_else(watch_spot, start_spot);
-            respawn_at(*client_id, pos, yaw, &mut respawns);
+        // When the mode keeps the fallen down, `kill` (or falling off the
+        // world) is a request to be put back somewhere sensible, not a death.
+        if !rules.respawn {
+            unstuck.write(Unstuck(entity));
             continue;
         }
         let Ok((mut health, mut score, name, pose, loadout)) = players.get_mut(entity) else {
@@ -312,7 +327,10 @@ pub fn receive_suicide(
             targets: SendTargets::All,
             message: Feed::Note(format!("{} gave up", name.0)),
         });
-        died.write(Died(entity));
+        died.write(Died {
+            victim: entity,
+            killer: entity,
+        });
         respawn(*client_id, &mut respawns);
     }
 }

@@ -2,7 +2,8 @@
 //! the longer you hold (up to `GRENADE.charge_secs`), the harder it goes.
 //! Release to throw. Left button throws overarm, right button lobs
 //! underhand. A `Throw` then goes to the server, which simulates the grenade
-//! and sets it off (`server::grenades`). You get one per life.
+//! and sets it off (`server::grenades`). You get one per life, or in a mode
+//! that counts them, as many as your `Kit` holds.
 
 use bevy::prelude::*;
 
@@ -45,6 +46,14 @@ pub fn grenade(
         if arsenal.current == flint {
             arsenal.reloading = 0.0;
         }
+    }
+    // In a mode that counts grenades, the next one comes to hand while any
+    // are left.
+    if arsenal.charge.is_none()
+        && arsenal.swing == Swing::None
+        && let Some(left) = arsenal.rounds_left(WeaponKind::Grenade)
+    {
+        arsenal.ammo[slot] = left.min(1);
     }
     if arsenal.current != WeaponKind::Grenade {
         return;
@@ -105,6 +114,7 @@ pub fn grenade(
                 origin: rig.translation(),
                 dir: rig.forward().as_vec3(),
             });
+            arsenal.count_shot(WeaponKind::Grenade);
             play(&mut commands, &sounds.shots[slot], 0.3 + 0.4 * strength);
         }
     }

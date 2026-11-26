@@ -309,7 +309,9 @@ for idx in "${!NAMES[@]}"; do
     done < <(grep '^error: ' "$out/console.txt")
     while IFS= read -r line; do
         [ -n "$line" ] && problems+=("log: $line")
-    done < <(grep -E 'panicked at| ERROR ' "$out/game.log" | cut -c1-240 | head -5)
+    # This machine's audio output failing isn't the game's fault.
+    done < <(grep -E 'panicked at| ERROR ' "$out/game.log" |
+        grep -v 'rodio::stream: audio stream error' | cut -c1-240 | head -5)
 
     shots=0
     while read -r shot; do

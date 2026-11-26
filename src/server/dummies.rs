@@ -6,12 +6,24 @@ use bevy_replicon::prelude::*;
 use crate::{
     config::MAX_HEALTH,
     net::{Downed, Dummy, Health, Pose},
-    server::players::hitbox,
+    server::{players::hitbox, rules::Rules},
     world::DUMMIES,
 };
 
 /// Put the practice dummies out if they aren't there yet.
-pub fn ensure_dummies(mut commands: Commands, dummies: Query<(), With<Dummy>>) {
+/// The practice dummies stand while the rules want them (not in every
+/// game mode).
+pub fn ensure_dummies(
+    mut commands: Commands,
+    dummies: Query<Entity, With<Dummy>>,
+    rules: Res<Rules>,
+) {
+    if !rules.dummies {
+        for entity in &dummies {
+            commands.entity(entity).despawn();
+        }
+        return;
+    }
     if !dummies.is_empty() {
         return;
     }

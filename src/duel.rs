@@ -18,15 +18,15 @@ use bevy_ahoy::prelude::*;
 use bevy_replicon::prelude::*;
 
 use crate::{
-    config::{DUEL_MARK_RADIUS, DUEL_MARKS, DUEL_RAISE_SECS, DUEL_ROOM, JUMP_HEIGHT},
+    config::{DUEL_MARK_RADIUS, DUEL_MARKS, DUEL_RAISE_SECS, DUEL_ROOM},
     console::{ConsoleAppExt, ConsoleCommand, Print},
     debug::probe::Probe,
     hud::{ACCENT, HudFont, TEXT, text},
-    net::{Duel, DuelPhase, LocalId, Out, Player, PlayerName, SelectWeapon},
-    player::{GameInput, LocalPlayer},
+    net::{Duel, DuelPhase, LocalId, Out, Player, PlayerName},
+    player::{GameInput, LocalPlayer, MoveLimits},
     render::no_shadow,
     sound::{Sounds, play},
-    weapon::{Arsenal, WeaponKind},
+    weapon::Arsenal,
 };
 
 /// How long "DRAW!" stays up after the bell.
@@ -37,7 +37,7 @@ pub(super) fn plugin(app: &mut App) {
         .add_systems(Startup, (make_marks, spawn_banners))
         .add_systems(
             PreUpdate,
-            (my_duel, quick_draw, weapon_rules)
+            (my_duel, quick_draw, weapon_rules, no_jump)
                 .chain()
                 .after(ClientSystems::Receive)
                 .after(bevy::input::InputSystems),
@@ -48,7 +48,7 @@ pub(super) fn plugin(app: &mut App) {
                 .after(AhoySystems::MoveCharacters)
                 .before(PhysicsSystems::First),
         )
-        .add_systems(Update, (no_jump, hide_out, marks, banners, cues, probe));
+        .add_systems(Update, (marks, banners, cues, probe));
     app.console_command(
         "draw",
         "",
@@ -103,21 +103,14 @@ fn my_duel(
 
 /// In a duel: the flintlock only, and the trigger works after "Draw!" for
 /// duelists still standing. (The server checks all of this too.)
-fn weapon_rules(
-    mine: Res<MyDuel>,
-    mut arsenal: ResMut<Arsenal>,
-    mut select: MessageWriter<SelectWeapon>,
-) {
+/// The trigger works only after "Draw!", for a duelist still standing who
+/// has drawn. (The server checks this too; the flintlock-only `Kit` it
+/// gives every player does the rest.)
+fn weapon_rules(mine: Res<MyDuel>, mut arsenal: ResMut<Arsenal>) {
     let on = mine.duel.is_some();
     // A holstered pistol can't fire either: draw first.
-    let locked = !mine.may_fire() || (on && !arsenal.drawing);
-    if arsenal.flintlock_only != on || arsenal.locked != locked || arsenal.out != mine.out {
-        arsenal.flintlock_only = on;
-        arsenal.locked = locked;
-        arsenal.out = mine.out;
-    }
-    if on && arsenal.select(WeaponKind::Flintlock) {
-        select.write(SelectWeapon(WeaponKind::Flintlock));
+    if !mine.may_fire() || (on && !arsenal.drawing) {
+        arsenal.locked = true;
     }
 }
 
@@ -194,26 +187,9 @@ fn hold_mark(
 }
 
 /// No jumping off your mark: Space is for drawing.
-fn no_jump(mine: Res<MyDuel>, mut controller: Single<&mut CharacterController, With<LocalPlayer>>) {
-    let height = if mine.rooted().is_some() {
-        0.0
-    } else {
-        JUMP_HEIGHT
-    };
-    if controller.jump_height != height {
-        controller.jump_height = height;
-    }
-}
-
-/// Players who are out aren't drawn. (Their bodies are under the player
-/// entity, so hiding it hides them.)
-fn hide_out(mut players: Query<(&mut Visibility, Has<Out>), With<Player>>) {
-    for (mut visibility, out) in &mut players {
-        visibility.set_if_neq(if out {
-            Visibility::Hidden
-        } else {
-            Visibility::Inherited
-        });
+fn no_jump(mine: Res<MyDuel>, mut limits: ResMut<MoveLimits>) {
+    if mine.rooted().is_some() {
+        limits.jump = false;
     }
 }
 

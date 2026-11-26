@@ -22,6 +22,7 @@ mod render;
 mod server;
 mod sky;
 mod sound;
+mod survival;
 mod weapon;
 mod world;
 
@@ -108,6 +109,7 @@ fn game() -> AppExit {
             debug::plugin,
             avatar::plugin,
             duel::plugin,
+            survival::plugin,
         ))
         .run()
 }

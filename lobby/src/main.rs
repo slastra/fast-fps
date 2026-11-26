@@ -73,7 +73,7 @@ const CREATE_EVERY: Duration = Duration::from_secs(10);
 /// How long a new game has to start.
 const START_TIMEOUT: Duration = Duration::from_secs(20);
 const NAME_CHARS: usize = 24;
-const MODES: [&str; 2] = ["ffa", "duel"];
+const MODES: [&str; 3] = ["ffa", "duel", "survival"];
 
 struct Config {
     key: [u8; 32],
@@ -373,8 +373,8 @@ fn start_game(shared: &Shared, id: u32, port: u16, mode: &str) -> Result<(), Str
     if let Some(offset) = config.wt_offset {
         command.args(["--webtransport", &(port + offset).to_string()]);
     }
-    if mode == "duel" {
-        command.args(["+mode", "duel"]);
+    if mode != "ffa" {
+        command.args(["+mode", mode]);
     }
     let mut child = command
         .stdin(Stdio::piped())

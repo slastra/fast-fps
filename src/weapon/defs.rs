@@ -467,7 +467,9 @@ impl Grenade {
         (held / self.charge_secs).clamp(0.0, 1.0)
     }
 
-    /// Damage at `distance` meters from the blast, before walls are checked.
+    /// Damage at `distance` meters from the blast, before walls are checked
+    /// (`server::combat::blast` works it out the same way).
+    #[cfg(test)]
     pub fn damage_at(&self, distance: f32) -> f32 {
         (self.damage * (1.0 - distance / self.radius)).max(0.0)
     }

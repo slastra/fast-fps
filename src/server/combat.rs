@@ -2,30 +2,70 @@
 //! in these directions"; the server ray casts each one against the world and
 //! the hitboxes and decides what it hit. Knife attacks work the same way with
 //! a short swept sphere. [`Hits`] applies the damage for every weapon,
-//! grenades included, and knows the duel's rules (see `server/duel.rs`).
+//! grenades included, under the current [`Rules`]; what a death means in a
+//! game mode is up to the mode (`server/rules.rs`).
 
 use avian3d::prelude::*;
 use bevy::{ecs::system::SystemParam, prelude::*};
 use bevy_replicon::prelude::*;
 
 use crate::{
-    config::{DUMMY_DOWN_SECS, MAX_HEALTH, SHOT_RANGE},
+    config::{DUMMY_DOWN_SECS, MAX_HEALTH, MOB_CORPSE_SECS, SHOT_RANGE},
     net::{
-        Damaged, Downed, Duel, DuelPhase, Feed, Fire, Health, HitConfirm, Melee, Out, Player,
-        PlayerName, Pose, Respawn, Score, ShotFx,
+        Damaged, Dead, Downed, Feed, Fire, Health, HitConfirm, Kit, Melee, Mob, Out, Player,
+        PlayerName, Pose, Respawn, Score, ShotFx, WeaponMods,
     },
     physics::Layer,
     server::{
-        duel::{DuelClock, record_loss},
         dummies::DownTimer,
         players::{PlayerClient, find_player, respawn},
+        rules::{Died, Disarmed, Rules, Untouchable},
     },
     weapon::{Class, KNIFE, WeaponKind},
 };
 
-/// Server-only: a player entity was killed (bots use this to respawn).
-#[derive(Message, Clone, Copy)]
-pub struct Died(pub Entity);
+/// Server-only: a hit that did damage, for game modes to react to (special
+/// ammo, healing on hit, ...) without touching how weapons work.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct HitLanded {
+    pub attacker: Entity,
+    pub target: Entity,
+    pub weapon: WeaponKind,
+    pub amount: f32,
+    pub point: Vec3,
+    pub dir: Vec3,
+    pub head: bool,
+    pub killed: bool,
+}
+
+/// Server-only: something exploded (see [`blast`]), for game modes to react
+/// to.
+#[derive(Message, Clone, Copy, Debug)]
+pub struct Boom {
+    pub at: Vec3,
+    pub attacker: Entity,
+    pub weapon: WeaponKind,
+    /// From [`Blast::tag`].
+    pub tag: u8,
+}
+
+/// Server-only: how long a killed mob stays before it's removed.
+#[derive(Component)]
+pub struct Corpse(pub f32);
+
+/// Remove killed mobs once their ragdoll has had time to be made.
+pub fn clear_corpses(
+    time: Res<Time>,
+    mut corpses: Query<(Entity, &mut Corpse)>,
+    mut commands: Commands,
+) {
+    for (entity, mut corpse) in &mut corpses {
+        corpse.0 -= time.delta_secs();
+        if corpse.0 <= 0.0 {
+            commands.entity(entity).despawn();
+        }
+    }
+}
 
 /// Server-only: a bot pulled the trigger (bots have no client to send `Fire`).
 #[derive(Message, Clone, Copy)]
@@ -44,6 +84,8 @@ pub fn head_line(pose: &Pose) -> f32 {
 /// What one hit did to its target.
 pub struct Hurt {
     pub killed: bool,
+    /// The target is a player (not a mob or a dummy).
+    pub player: bool,
     /// Where the target was standing and facing when hit, for the `Damaged`
     /// message (corpses spawn there, not at the respawned entity).
     pub pos: Vec3,
@@ -66,9 +108,14 @@ pub struct Hits<'w, 's> {
             Has<Player>,
             Has<Downed>,
             Has<Out>,
+            Has<Mob>,
+            Has<Untouchable>,
         ),
     >,
-    duels: Query<'w, 's, (&'static mut Duel, &'static mut DuelClock)>,
+    rules: Res<'w, Rules>,
+    pub kits: Query<'w, 's, &'static mut Kit>,
+    pub mods: Query<'w, 's, &'static WeaponMods>,
+    disarmed: Query<'w, 's, (), With<Disarmed>>,
     scores: Query<'w, 's, &'static mut Score>,
     names: Query<'w, 's, &'static PlayerName>,
     pub owners: Query<'w, 's, &'static Player>,
@@ -78,12 +125,16 @@ pub struct Hits<'w, 's> {
     respawns: MessageWriter<'w, ToClients<Respawn>>,
     damaged: MessageWriter<'w, ToClients<Damaged>>,
     died: MessageWriter<'w, Died>,
+    pub landed: MessageWriter<'w, HitLanded>,
+    booms: MessageWriter<'w, Boom>,
 }
 
 impl Hits<'_, '_> {
     /// Take `amount` health from `target`. A kill scores for `attacker`
-    /// (unless it was themselves), goes in the feed and respawns the victim.
-    /// `None` if the target can't be hurt.
+    /// (unless it was themselves) and is announced with [`Died`]; a killed
+    /// player respawns if the [`Rules`] say so, and goes in the feed. `None`
+    /// if the target can't be hurt (out of play, untouchable, or a teammate
+    /// without friendly fire).
     pub fn hurt(
         &mut self,
         attacker: Entity,
@@ -92,14 +143,23 @@ impl Hits<'_, '_> {
         head: bool,
         weapon: WeaponKind,
     ) -> Option<Hurt> {
-        let Ok((mut health, pose, is_player, downed, out)) = self.targets.get_mut(target) else {
+        let attacker_is_player = self.targets.get(attacker).is_ok_and(|t| t.2);
+        let friendly_fire = self.rules.friendly_fire;
+        let respawns = self.rules.respawn;
+        let Ok((mut health, pose, is_player, downed, out, mob, untouchable)) =
+            self.targets.get_mut(target)
+        else {
             return None;
         };
-        if downed || out {
+        if downed || out || untouchable || health.0 <= 0.0 {
+            return None;
+        }
+        if is_player && attacker_is_player && attacker != target && !friendly_fire {
             return None;
         }
         let mut hurt = Hurt {
             killed: false,
+            player: is_player,
             pos: pose.pos,
             yaw: pose.yaw,
         };
@@ -108,6 +168,21 @@ impl Hits<'_, '_> {
             return Some(hurt);
         }
         hurt.killed = true;
+        if mob {
+            // It stays a moment for clients to make its ragdoll from.
+            health.0 = 0.0;
+            self.commands
+                .entity(target)
+                .insert((Dead, Corpse(MOB_CORPSE_SECS)));
+            if let Ok(mut score) = self.scores.get_mut(attacker) {
+                score.kills += 1;
+            }
+            self.died.write(Died {
+                victim: target,
+                killer: attacker,
+            });
+            return Some(hurt);
+        }
         if !is_player {
             health.0 = 0.0;
             self.commands.entity(target).insert((
@@ -116,12 +191,8 @@ impl Hits<'_, '_> {
             ));
             return Some(hurt);
         }
-        // In a duel the fallen stay at 0 until the next round heals them.
-        health.0 = if self.duels.is_empty() {
-            MAX_HEALTH
-        } else {
-            0.0
-        };
+        // Without respawning, the fallen stay at 0 until the mode decides.
+        health.0 = if respawns { MAX_HEALTH } else { 0.0 };
         if let Ok(mut score) = self.scores.get_mut(target) {
             score.deaths += 1;
         }
@@ -145,37 +216,36 @@ impl Hits<'_, '_> {
                 headshot: head,
             },
         });
-        if let Ok((mut duel, mut clock)) = self.duels.single_mut() {
-            // In a duel the fallen stay down until the next round.
-            self.commands.entity(target).insert(Out);
-            if let Some(slot) = self
-                .owners
-                .get(target)
-                .ok()
-                .and_then(|p| duel.slot(p.owner))
-            {
-                record_loss(&mut duel, &mut clock.0, slot);
-            }
-        } else if let Ok((_, victim_client)) = self.clients.get(target) {
+        if respawns && let Ok((_, victim_client)) = self.clients.get(target) {
             respawn(victim_client.0, &mut self.respawns);
         }
-        self.died.write(Died(target));
+        self.died.write(Died {
+            victim: target,
+            killer: attacker,
+        });
         Some(hurt)
     }
 
-    /// Whether `shooter` may attack with `weapon` right now. Always, except
-    /// in a duel: only the flintlock, only after "Draw!", and only while
-    /// still standing.
+    /// Whether `shooter` may attack with `weapon` right now: in play, not
+    /// disarmed by the mode, and owning the weapon if they have a `Kit`.
     pub fn allows(&self, shooter: Entity, weapon: WeaponKind) -> bool {
-        let Ok((duel, _)) = self.duels.single() else {
-            return true;
+        if self.targets.get(shooter).is_ok_and(|t| t.4) || self.disarmed.contains(shooter) {
+            return false;
+        }
+        self.kits.get(shooter).is_ok_and(|kit| kit.owns(weapon)) || !self.kits.contains(shooter)
+    }
+
+    /// Damage for one hit of `weapon` by `shooter`, before distance falloff.
+    pub fn damage(&self, shooter: Entity, weapon: WeaponKind, head: bool) -> f32 {
+        let def = weapon.def();
+        let mods = self.mods.get(shooter).ok();
+        let mult = mods.map_or(1.0, |m| m.damage[weapon.index()]);
+        let head_mult = if head {
+            def.head_mult * mods.map_or(1.0, |m| m.head)
+        } else {
+            1.0
         };
-        let out = self.targets.get(shooter).is_ok_and(|t| t.4);
-        let dueling = self
-            .owners
-            .get(shooter)
-            .is_ok_and(|p| duel.slot(p.owner).is_some());
-        weapon == WeaponKind::Flintlock && duel.phase == DuelPhase::Draw && dueling && !out
+        def.damage * mult * head_mult
     }
 
     /// Tell everyone a target was hit (for blood, flinches and ragdolls).
@@ -194,7 +264,8 @@ impl Hits<'_, '_> {
                 dir: dir.normalize_or_zero(),
                 point,
                 weapon,
-                killed: hurt.killed,
+                // Drop a ragdoll, unless the rules say players don't.
+                killed: hurt.killed && (!hurt.player || self.rules.player_corpses),
                 pos: hurt.pos,
                 yaw: hurt.yaw,
             },
@@ -211,6 +282,76 @@ impl Hits<'_, '_> {
         }
     }
 }
+
+/// An explosion: who set it off, where, how hard and how far it reaches.
+pub struct Blast {
+    pub at: Vec3,
+    pub attacker: Entity,
+    /// Damage at the center, falling off evenly to nothing at `radius`.
+    pub damage: f32,
+    pub radius: f32,
+    pub weapon: WeaponKind,
+    /// A game mode's mark on its own explosions, passed on in [`Boom`] (0 for
+    /// an ordinary grenade).
+    pub tag: u8,
+}
+
+/// Hurt everyone in `near` (entity and position) that `b` reaches and no
+/// wall shields, throw them up and away, and confirm hits to the attacker.
+/// Used by grenades, and by game modes for anything else that explodes.
+pub fn blast(spatial: &SpatialQuery, hits: &mut Hits, near: &[(Entity, Vec3)], b: Blast) {
+    hits.booms.write(Boom {
+        at: b.at,
+        attacker: b.attacker,
+        weapon: b.weapon,
+        tag: b.tag,
+    });
+    let walls = SpatialQueryFilter::from_mask(Layer::World);
+    let mut any_hit = false;
+    let mut any_kill = false;
+    for &(target, pos) in near {
+        let chest = pos + Vec3::Y * CHEST;
+        let offset = chest - b.at;
+        let distance = offset.length();
+        let damage = (b.damage * (1.0 - distance / b.radius)).max(0.0);
+        if damage <= 0.0 {
+            continue;
+        }
+        // Walls shield you. The ray stops a little short of the target so the
+        // floor it stands on doesn't count.
+        if let Ok(dir) = Dir3::new(offset)
+            && spatial
+                .cast_ray(b.at, dir, (distance - 0.3).max(0.0), true, &walls)
+                .is_some()
+        {
+            continue;
+        }
+        let Some(hurt) = hits.hurt(b.attacker, target, damage, false, b.weapon) else {
+            continue;
+        };
+        any_hit |= target != b.attacker;
+        any_kill |= hurt.killed && target != b.attacker;
+        hits.landed.write(HitLanded {
+            attacker: b.attacker,
+            target,
+            weapon: b.weapon,
+            amount: damage,
+            point: chest,
+            dir: offset.normalize_or_zero(),
+            head: false,
+            killed: hurt.killed,
+        });
+        // Bodies fly up and away from the blast.
+        let push = offset.normalize_or_zero() + Vec3::Y * 0.6;
+        hits.wounded(target, &hurt, push, chest, b.weapon);
+    }
+    if any_hit {
+        hits.confirm(b.attacker, false, any_kill);
+    }
+}
+
+/// How high above a body's center a blast aims (the chest).
+const CHEST: f32 = 0.2;
 
 /// Fire `dirs` (one per pellet) from `origin`: ray cast each, damage what
 /// they hit, tell everyone who was hurt, and confirm hits to the shooter.
@@ -238,33 +379,55 @@ pub fn shoot(
     // One `Damaged` per target per blast: (target, summed dir, first point, result).
     let mut wounds: Vec<(Entity, Vec3, Vec3, Hurt)> = Vec::new();
 
+    // Each shot can pass through this many targets after the first.
+    let pierce = hits
+        .mods
+        .get(shooter)
+        .map_or(0, |m| m.pierce[weapon.index()]) as usize;
     for dir in dirs {
         let Ok(dir) = Dir3::new(*dir) else {
             continue;
         };
-        let hit = spatial.cast_ray(origin, dir, SHOT_RANGE, true, &filter);
-        let (end, normal) = match hit {
-            Some(hit) => (origin + dir * hit.distance, hit.normal),
-            None => (origin + dir * SHOT_RANGE, Vec3::ZERO),
-        };
+        let mut from = origin;
+        let mut travelled = 0.0;
+        let mut passed: Vec<Entity> = Vec::new();
+        let mut end = origin + dir * SHOT_RANGE;
+        let mut normal = Vec3::ZERO;
         let mut flesh = false;
-        if let Some(hit) = hit
-            && !killed.contains(&hit.entity)
-            && let Ok((_, pose, ..)) = hits.targets.get(hit.entity)
-        {
-            let head = end.y > pose.pos.y + head_line(pose);
-            let falloff = def.falloff_per_10m.powf(hit.distance / 10.0);
-            let mult = if head { def.head_mult } else { 1.0 };
-            if let Some(hurt) = hits.hurt(
-                shooter,
-                hit.entity,
-                def.damage * mult * falloff,
-                head,
-                weapon,
-            ) {
+        loop {
+            // Never the shooter, nor anything this shot passed through or
+            // has killed already.
+            let skip = std::iter::once(shooter).chain(passed.iter().chain(&killed).copied());
+            let filter = filter.clone().with_excluded_entities(skip);
+            let Some(hit) = spatial.cast_ray(from, dir, SHOT_RANGE - travelled, true, &filter)
+            else {
+                break;
+            };
+            travelled += hit.distance;
+            let point = from + dir * hit.distance;
+            end = point;
+            normal = hit.normal;
+            let Ok((_, pose, ..)) = hits.targets.get(hit.entity) else {
+                // The world stops a bullet.
+                break;
+            };
+            let head = point.y > pose.pos.y + head_line(pose);
+            let falloff = def.falloff_per_10m.powf(travelled / 10.0);
+            let amount = hits.damage(shooter, weapon, head) * falloff;
+            if let Some(hurt) = hits.hurt(shooter, hit.entity, amount, head, weapon) {
                 flesh = true;
                 any_hit = true;
                 any_head |= head;
+                hits.landed.write(HitLanded {
+                    attacker: shooter,
+                    target: hit.entity,
+                    weapon,
+                    amount,
+                    point,
+                    dir: dir.as_vec3(),
+                    head,
+                    killed: hurt.killed,
+                });
                 if hurt.killed {
                     any_kill = true;
                     killed.push(hit.entity);
@@ -274,9 +437,14 @@ pub fn shoot(
                         w.1 += dir.as_vec3();
                         w.3.killed |= hurt.killed;
                     }
-                    None => wounds.push((hit.entity, dir.as_vec3(), end, hurt)),
+                    None => wounds.push((hit.entity, dir.as_vec3(), point, hurt)),
                 }
             }
+            if passed.len() >= pierce {
+                break;
+            }
+            passed.push(hit.entity);
+            from = point;
         }
         effects.push(ShotFx {
             shooter: shooter_id,
@@ -313,10 +481,17 @@ pub fn receive_fire(
             continue;
         };
         let def = message.weapon.def();
+        let pellets = WeaponMods::pellets_of(hits.mods.get(shooter).ok(), message.weapon);
         if def.class != Class::Gun
             || !message.origin.is_finite()
-            || message.dirs.len() > def.pellets as usize
+            || message.dirs.len() > pellets as usize
             || !hits.allows(shooter, message.weapon)
+        {
+            continue;
+        }
+        // Out of ammo, in a mode that counts it.
+        if let Ok(mut kit) = hits.kits.get_mut(shooter)
+            && !kit.spend(message.weapon)
         {
             continue;
         }
@@ -425,19 +600,33 @@ pub fn receive_melee(
             end = hit.point1;
             normal = hit.normal1;
             if let Ok((_, pose, ..)) = hits.targets.get(hit.entity) {
+                let mult = hits
+                    .mods
+                    .get(attacker)
+                    .map_or(1.0, |m| m.damage[WeaponKind::Knife.index()]);
                 let amount = if KNIFE.is_behind(dir.as_vec3(), pose.yaw) {
                     // Enough to kill from full health.
                     1000.0
                 } else if message.heavy {
-                    KNIFE.stab
+                    KNIFE.stab * mult
                 } else {
-                    KNIFE.slash
+                    KNIFE.slash * mult
                 };
                 if let Some(hurt) =
                     hits.hurt(attacker, hit.entity, amount, false, WeaponKind::Knife)
                 {
                     flesh = true;
                     let kill = hurt.killed;
+                    hits.landed.write(HitLanded {
+                        attacker,
+                        target: hit.entity,
+                        weapon: WeaponKind::Knife,
+                        amount,
+                        point: end,
+                        dir: dir.as_vec3(),
+                        head: false,
+                        killed: kill,
+                    });
                     hits.wounded(hit.entity, &hurt, dir.as_vec3(), end, WeaponKind::Knife);
                     hits.confirm(attacker, false, kill);
                 }

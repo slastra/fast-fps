@@ -14,6 +14,8 @@ coding agents.
 - **Five guns** with fixed, learnable spray patterns, and a crosshair that shows your real accuracy
 - **A knife and a frag grenade**: slash, stab or backstab; throw or lob, and bounce it off walls
 - **A flintlock pistol and a duel mode**: walk to your mark, wait for the bell, draw
+- **Co-op survival**: endless waves of zombies through cracks in the walls, special ammo
+  that combines, perks, and teammates to revive
 - **Four skies**: night, dusk, dawn and day, switched live from the console
 - **A minimal HUD** whose weapon icons are rendered from the gun models themselves
 - **Animated players** with no keyframes: legs and arms are solved in code with inverse kinematics
@@ -75,6 +77,18 @@ stays, and the next player in line steps up. Everyone else watches, unseen, unti
 To practice alone, add a bot with `bot` (`bot_duel_aim 0` to `1` sets how well it shoots).
 `mode ffa` goes back to free-for-all.
 
+### Survival
+
+Type `mode survival` for co-op against endless waves of zombies (alone works too). You start
+in the keep with a Glock and a knife. Zombies climb through cracks in the outer wall and head
+for you, three in the first wave and more every wave, with more cracks opening as the waves
+go on. Ammo is scarce: the dead sometimes drop a box of it. Between waves each player picks
+one of three cards: a new gun, a level up for one, a special ammo (incendiary, frost, shock,
+piercing, explosive, leech; two loaded together make a combo) or a perk. A lethal hit puts
+you on your knees; a teammate holding E beside you brings you back, and if nobody does in 30
+seconds you sit out until the next wave. When everyone is down at once, the run is over.
+[docs/survival.md](docs/survival.md) has every card and combo.
+
 For something to shoot at, press `~` and type `exec cfg/bots.cfg`. To change the time of day,
 type `sky night`, `sky dusk`, `sky dawn`, `sky day`, or `sky next` to cycle.
 
@@ -93,7 +107,7 @@ for whoever asks. Press `~`, then:
 
 ```
 games                   lists the games running in the lobby
-create duel Fast hands  starts a game (ffa or duel) and joins it
+create duel Fast hands  starts a game (ffa, duel or survival) and joins it
 join fast               joins a game by name (or by its number in the list)
 ```
 

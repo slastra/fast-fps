@@ -9,15 +9,18 @@
 //! - [`grenades`]: thrown grenades, their flight and their blast.
 //! - [`dummies`]: the practice targets.
 //! - [`bots`]: practice bots driven from the console.
+//! - [`rules`]: what game modes share: `Rules`, the `mode` command, deaths.
 //! - [`duel`]: the duel game mode (`mode duel`).
 
 mod admin;
 mod bots;
-mod combat;
+pub mod combat;
 mod duel;
 mod dummies;
 mod grenades;
-mod players;
+pub mod players;
+pub mod rules;
+mod survival;
 
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
@@ -26,7 +29,9 @@ pub use players::PlayerClient;
 
 use crate::dedicated::Dedicated;
 use crate::server::{
-    combat::{BotShot, Died, receive_bot_shots, receive_fire, receive_melee},
+    combat::{
+        Boom, BotShot, HitLanded, clear_corpses, receive_bot_shots, receive_fire, receive_melee,
+    },
     dummies::{ensure_dummies, move_dummies, tick_downed},
     grenades::{receive_throws, tick_grenades},
     players::{
@@ -37,8 +42,9 @@ use crate::server::{
 
 pub(super) fn plugin(app: &mut App) {
     let authority = in_state(ClientState::Disconnected);
-    app.add_message::<Died>()
-        .add_message::<BotShot>()
+    app.add_message::<BotShot>()
+        .add_message::<HitLanded>()
+        .add_message::<Boom>()
         .add_systems(
             PreUpdate,
             (
@@ -64,9 +70,22 @@ pub(super) fn plugin(app: &mut App) {
         )
         .add_systems(
             Update,
-            (hitboxes_follow_pose, tick_grenades, receive_bot_shots).run_if(authority),
+            (
+                hitboxes_follow_pose,
+                tick_grenades,
+                receive_bot_shots,
+                clear_corpses,
+            )
+                .run_if(authority),
         )
         .add_observer(on_client_authorized)
         .add_observer(on_client_removed)
-        .add_plugins((admin::plugin, bots::plugin, duel::plugin, grenades::plugin));
+        .add_plugins((
+            rules::plugin,
+            admin::plugin,
+            bots::plugin,
+            duel::plugin,
+            grenades::plugin,
+            survival::plugin,
+        ));
 }

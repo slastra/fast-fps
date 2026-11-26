@@ -91,7 +91,7 @@ pub fn reload_bar(
         Visibility::Hidden
     });
     if reloading {
-        let done = 1.0 - arsenal.reloading / arsenal.def().reload_secs;
+        let done = 1.0 - arsenal.reloading / arsenal.reload_secs(arsenal.current);
         fill.0.width = percent(done.clamp(0.0, 1.0) * 100.0);
         fill.1.0 = ACCENT;
     }

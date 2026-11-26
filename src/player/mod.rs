@@ -30,26 +30,75 @@ use crate::{
 
 pub(super) fn plugin(app: &mut App) {
     app.add_plugins((input::plugin, view::plugin))
+        .init_resource::<MoveLimits>()
         .add_systems(Startup, spawn_local_player)
+        .add_systems(First, reset_limits)
         .add_systems(PreUpdate, apply_respawn.after(ClientSystems::Receive))
-        .add_systems(Update, (send_move, fall_out, player_commands, knife_speed));
+        .add_systems(Update, (send_move, fall_out, player_commands))
+        .add_systems(PostUpdate, apply_limits);
 
     app.console_command("kill", "", "respawn somewhere else")
         .console_command("pos", "", "print your position and view angles");
 }
 
 /// Run a little faster with the knife out, as in Counter-Strike.
-fn knife_speed(
+/// Limits a game mode puts on the local player this frame: a speed scale,
+/// whether they may jump, and pose flags to show (such as `Pose::DOWN`).
+/// Back to "no limits" at the start of every frame, so a mode sets what it
+/// wants each frame, in `PreUpdate`.
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
+pub struct MoveLimits {
+    pub speed: f32,
+    pub jump: bool,
+    /// See from crouching height, standing or not (kneeling, downed).
+    pub low: bool,
+    pub flags: u8,
+}
+
+impl Default for MoveLimits {
+    fn default() -> Self {
+        Self {
+            speed: 1.0,
+            jump: true,
+            low: false,
+            flags: 0,
+        }
+    }
+}
+
+fn reset_limits(mut limits: ResMut<MoveLimits>) {
+    limits.set_if_neq(MoveLimits::default());
+}
+
+/// Running speed (a little faster with the knife, as in Counter-Strike, and
+/// as a game mode's upgrades and limits say) and whether you can jump.
+fn apply_limits(
     arsenal: Res<Arsenal>,
+    limits: Res<MoveLimits>,
     mut controller: Single<&mut CharacterController, With<LocalPlayer>>,
+    mut standing: Local<Option<f32>>,
 ) {
-    let speed = if arsenal.current == WeaponKind::Knife {
-        RUN_SPEED * KNIFE_SPEED_SCALE
+    let standing = *standing.get_or_insert(controller.standing_view_height);
+    let view = if limits.low {
+        controller.crouch_view_height
     } else {
-        RUN_SPEED
+        standing
     };
+    if controller.standing_view_height != view {
+        controller.standing_view_height = view;
+    }
+    let knife = if arsenal.current == WeaponKind::Knife {
+        KNIFE_SPEED_SCALE
+    } else {
+        1.0
+    };
+    let speed = RUN_SPEED * knife * arsenal.mods.speed * limits.speed;
     if controller.speed != speed {
         controller.speed = speed;
+    }
+    let jump = if limits.jump { JUMP_HEIGHT } else { 0.0 };
+    if controller.jump_height != jump {
+        controller.jump_height = jump;
     }
 }
 
@@ -100,6 +149,7 @@ fn send_move(
     player: Single<(&Transform, &LinearVelocity, &CharacterControllerState), With<LocalPlayer>>,
     camera: Single<&Transform, With<ViewRig>>,
     arsenal: Res<Arsenal>,
+    limits: Res<MoveLimits>,
     mut moves: MessageWriter<MoveInput>,
 ) {
     let (transform, velocity, state) = *player;
@@ -115,6 +165,7 @@ fn send_move(
     pose.set(Pose::AIR, state.grounded.is_none());
     pose.set(Pose::RELOAD, arsenal.reloading > 0.0);
     pose.set(Pose::HOLSTER, arsenal.holstered());
+    pose.flags |= limits.flags;
     moves.write(MoveInput(pose));
 }
 

@@ -41,7 +41,7 @@ pub(super) fn plugin(app: &mut App) {
         .console_command("games", "", "list the games in the lobby")
         .console_command(
             "create",
-            "[ffa|duel] [name]",
+            "[ffa|duel|survival] [name]",
             "start a game in the lobby and join it",
         )
         .console_command("join", "<id|name>", "join a game in the lobby");
@@ -193,7 +193,7 @@ fn lobby_commands(
             }
             "create" => {
                 let (mode, words) = match cmd.arg(0) {
-                    Some(m @ ("ffa" | "duel")) => (m, &cmd.args[1..]),
+                    Some(m @ ("ffa" | "duel" | "survival")) => (m, &cmd.args[1..]),
                     _ => ("ffa", &cmd.args[..]),
                 };
                 let protocol = protocol_text(&protocol);

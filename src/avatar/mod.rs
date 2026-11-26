@@ -10,6 +10,7 @@
 
 pub mod anim;
 mod ik;
+pub mod mob;
 mod ragdoll;
 pub mod rig;
 
@@ -18,18 +19,34 @@ pub use ragdoll::Ragdoll;
 use bevy::prelude::*;
 use bevy_replicon::prelude::*;
 
-use crate::net::{Damaged, Dummy, Loadout, LocalId, Player, Pose, ShotFx};
+use crate::net::{Damaged, Dead, Dummy, Loadout, LocalId, Mob, Out, Player, Pose, ShotFx};
 use anim::AvatarAnim;
 use rig::AvatarRig;
 
 pub(super) fn plugin(app: &mut App) {
-    app.init_resource::<ragdoll::Ragdolls>()
+    app.add_plugins(mob::plugin)
+        .init_resource::<ragdoll::Ragdolls>()
         .add_observer(dress_player)
         .add_systems(
             Update,
             (smooth_remote, shots, damaged, anim::advance, anim::apply).chain(),
         )
-        .add_systems(Update, ragdoll::age);
+        .add_systems(Update, (ragdoll::age, hide_out));
+}
+
+/// Players who are out of play (`Out`: dead for the rest of a round,
+/// watching, bled out) aren't drawn, nor are dead mobs (their ragdoll is).
+/// Bodies are under the entity, so hiding it hides them.
+fn hide_out(
+    mut bodies: Query<(&mut Visibility, Has<Out>, Has<Dead>), Or<(With<Player>, With<Mob>)>>,
+) {
+    for (mut visibility, out, dead) in &mut bodies {
+        visibility.set_if_neq(if out || dead {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        });
+    }
 }
 
 /// Give every player but yourself a body.
@@ -116,7 +133,10 @@ fn damaged(
 /// Replicated poses arrive at the server tick rate; ease toward them.
 pub fn smooth_remote(
     time: Res<Time>,
-    mut remotes: Query<(&Pose, &mut Transform), (With<Remote>, Or<(With<Player>, With<Dummy>)>)>,
+    mut remotes: Query<
+        (&Pose, &mut Transform),
+        (With<Remote>, Or<(With<Player>, With<Dummy>, With<Mob>)>),
+    >,
 ) {
     let dt = time.delta_secs();
     for (pose, mut transform) in &mut remotes {

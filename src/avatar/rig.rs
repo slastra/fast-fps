@@ -246,7 +246,25 @@ pub fn player_color(owner: u64) -> Color {
     Color::hsl(hue, 0.65, 0.5)
 }
 
-/// Build the joint hierarchy and boxes under `player`.
+/// How a body is painted: its main color, the darker trim, and the glow
+/// of the visor (or eyes).
+#[derive(Clone, Copy, Debug)]
+pub struct Look {
+    pub body: Color,
+    pub trim: Color,
+    pub glow: Color,
+}
+
+/// Meshes and materials that bodies of one kind share (mobs of a kind all
+/// look alike, so they're built once). Filled by the first body built.
+#[derive(Default)]
+pub struct Shared {
+    meshes: Vec<Handle<Mesh>>,
+    materials: Option<(Handle<StandardMaterial>, Handle<StandardMaterial>)>,
+}
+
+/// Build a player's joint hierarchy and boxes under `player`, in their
+/// color, carrying every gun.
 pub fn spawn(
     commands: &mut Commands,
     player: Entity,
@@ -254,17 +272,48 @@ pub fn spawn(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
 ) -> AvatarRig {
-    let mut rng = StdRng::seed_from_u64(owner);
     let team = player_color(owner);
-    let material = materials.add(StandardMaterial {
-        perceptual_roughness: 0.85,
-        ..default()
+    let look = Look {
+        body: team,
+        trim: team.darker(0.14),
+        glow: team,
+    };
+    spawn_with(commands, player, owner, look, true, meshes, materials, None)
+}
+
+/// Build a body under `parent`: painted as `look`, its boxes shaped from
+/// `seed`, with the guns or not, and sharing `shared` meshes when given.
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_with(
+    commands: &mut Commands,
+    parent: Entity,
+    seed: u64,
+    look: Look,
+    guns: bool,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    mut shared: Option<&mut Shared>,
+) -> AvatarRig {
+    let mut rng = StdRng::seed_from_u64(seed);
+    let team = look.body;
+    let made = shared.as_ref().and_then(|s| s.materials.clone());
+    let (material, glow) = made.unwrap_or_else(|| {
+        let material = materials.add(StandardMaterial {
+            perceptual_roughness: 0.85,
+            ..default()
+        });
+        let glow = materials.add(StandardMaterial {
+            base_color: look.glow,
+            emissive: look.glow.to_linear() * 8.0,
+            ..default()
+        });
+        (material, glow)
     });
-    let glow = materials.add(StandardMaterial {
-        base_color: team,
-        emissive: team.to_linear() * 8.0,
-        ..default()
-    });
+    if let Some(shared) = shared.as_mut() {
+        shared.materials = Some((material.clone(), glow.clone()));
+    }
+    let player = parent;
+    let mut box_index = 0;
 
     let root = commands
         .spawn((
@@ -292,18 +341,29 @@ pub fn spawn(
             let size = Vec3::from(b.size);
             let center = Vec3::from(b.center);
             let is_glow = matches!(b.paint, Paint::Glow);
+            let reuse = shared
+                .as_ref()
+                .and_then(|s| s.meshes.get(box_index).cloned());
             let (mesh, mat) = if is_glow {
-                (meshes.add(Cuboid::from_size(size)), glow.clone())
+                let mesh = reuse.unwrap_or_else(|| meshes.add(Cuboid::from_size(size)));
+                (mesh, glow.clone())
             } else {
                 let color = match b.paint {
                     Paint::Team => team,
-                    Paint::TeamDark => team.darker(0.14),
+                    Paint::TeamDark => look.trim,
                     Paint::Dark => Color::srgb(0.09, 0.09, 0.11),
                     Paint::Boot | Paint::Glow => Color::srgb(0.04, 0.04, 0.05),
                 };
-                let mesh = lowpoly::block(size, color, 0.08, &mut rng);
-                (meshes.add(mesh), material.clone())
+                let mesh = reuse
+                    .unwrap_or_else(|| meshes.add(lowpoly::block(size, color, 0.08, &mut rng)));
+                (mesh, material.clone())
             };
+            if let Some(shared) = shared.as_mut()
+                && shared.meshes.len() == box_index
+            {
+                shared.meshes.push(mesh.clone());
+            }
+            box_index += 1;
             let mut part = commands.spawn((
                 Mesh3d(mesh.clone()),
                 MeshMaterial3d(mat.clone()),
@@ -331,10 +391,12 @@ pub fn spawn(
             ChildOf(root),
         ))
         .id();
-    let gun_material = MeshMaterial3d(material.clone());
-    commands.entity(gun).with_children(|mount| {
-        weapon::spawn_avatar_guns(mount, meshes, &gun_material, &mut rng);
-    });
+    if guns {
+        let gun_material = MeshMaterial3d(material.clone());
+        commands.entity(gun).with_children(|mount| {
+            weapon::spawn_avatar_guns(mount, meshes, &gun_material, &mut rng);
+        });
+    }
 
     AvatarRig {
         root,

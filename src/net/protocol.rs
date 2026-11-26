@@ -39,7 +39,15 @@ pub(super) fn register(app: &mut App) {
         .replicate::<Duel>()
         .replicate::<Out>()
         .add_client_message::<AdminCommand>(Channel::Ordered)
-        .add_server_message::<ConsoleReply>(Channel::Ordered);
+        .add_server_message::<ConsoleReply>(Channel::Ordered)
+        .replicate::<GameMode>()
+        .replicate::<Kit>()
+        .replicate::<WeaponMods>()
+        .replicate::<Mob>()
+        .replicate::<Dead>();
+    // Game modes keep their own wire types in their own modules; they are
+    // registered here, last, so the order is still fixed.
+    crate::survival::protocol::register(app);
 }
 
 /// A build's Replicon protocol hash as text, for the lobby's version check:
@@ -86,14 +94,14 @@ impl Player {
 pub struct PlayerName(pub String);
 
 /// Where a player or dummy is. `pos` is the collider center.
-#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default)]
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq)]
 pub struct Pose {
     pub pos: Vec3,
     pub yaw: f32,
     pub pitch: f32,
     /// World-space velocity, used to animate the body.
     pub vel: Vec3,
-    /// `Pose::CROUCH | Pose::AIR | Pose::RELOAD | Pose::HOLSTER`.
+    /// `Pose::CROUCH`, `AIR`, `RELOAD`, `HOLSTER`, `DOWN`, `REACH`, `SWING`.
     pub flags: u8,
 }
 
@@ -103,6 +111,12 @@ impl Pose {
     pub const RELOAD: u8 = 4;
     /// A duelist's pistol is still in the holster, at the hip.
     pub const HOLSTER: u8 = 8;
+    /// Down on one knee (a game mode's "downed").
+    pub const DOWN: u8 = 16;
+    /// Arms out in front, reaching (a mob).
+    pub const REACH: u8 = 32;
+    /// Swinging at someone (a mob's attack).
+    pub const SWING: u8 = 64;
 
     pub fn has(&self, flag: u8) -> bool {
         self.flags & flag != 0
@@ -339,3 +353,164 @@ impl DuelPhase {
 /// can't fire.
 #[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]
 pub struct Out;
+
+/// The game mode that's on, on one replicated entity the server keeps
+/// (`server/rules.rs`), so clients can show it.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct GameMode(pub String);
+
+/// What a player may use, in a mode that limits it: the weapons they own and
+/// how many rounds each has left, magazine and spare together. Without a
+/// `Kit` (free-for-all) everything is owned and ammo never runs out.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Kit {
+    /// One bit per weapon, by `WeaponKind::index`.
+    pub owned: u16,
+    /// Rounds left per weapon, magazine and spare together. [`Kit::UNLIMITED`]
+    /// never runs out. For the grenade, grenades.
+    pub ammo: [u16; WeaponKind::COUNT],
+    /// Rounds the server has counted as fired, per weapon (wrapping). The
+    /// player's game compares it with its own count to know how many of its
+    /// shots the server hasn't seen yet, so its ammo display doesn't jump.
+    pub spent: [u16; WeaponKind::COUNT],
+}
+
+impl Kit {
+    pub const UNLIMITED: u16 = u16::MAX;
+
+    /// Only these weapons, each with unlimited ammo.
+    pub fn only(weapons: &[WeaponKind]) -> Self {
+        let mut kit = Self {
+            owned: 0,
+            ammo: [0; WeaponKind::COUNT],
+            spent: [0; WeaponKind::COUNT],
+        };
+        for &w in weapons {
+            kit.give(w, Self::UNLIMITED);
+        }
+        kit
+    }
+
+    pub fn owns(&self, weapon: WeaponKind) -> bool {
+        self.owned & (1 << weapon.index()) != 0
+    }
+
+    /// Own `weapon`, with `rounds` more of it.
+    pub fn give(&mut self, weapon: WeaponKind, rounds: u16) {
+        self.owned |= 1 << weapon.index();
+        self.add(weapon, rounds);
+    }
+
+    /// More rounds for `weapon` (nothing changes if it's unlimited).
+    pub fn add(&mut self, weapon: WeaponKind, rounds: u16) {
+        let left = &mut self.ammo[weapon.index()];
+        if *left != Self::UNLIMITED {
+            *left = left.saturating_add(rounds).min(Self::UNLIMITED - 1);
+        }
+    }
+
+    /// Rounds left for `weapon`, if it's limited.
+    pub fn left(&self, weapon: WeaponKind) -> Option<u16> {
+        let left = self.ammo[weapon.index()];
+        (left != Self::UNLIMITED).then_some(left)
+    }
+
+    /// Spend one round of `weapon`. False if there are none left.
+    pub fn spend(&mut self, weapon: WeaponKind) -> bool {
+        let i = weapon.index();
+        match self.ammo[i] {
+            Self::UNLIMITED => {}
+            0 => return false,
+            _ => self.ammo[i] -= 1,
+        }
+        self.spent[i] = self.spent[i].wrapping_add(1);
+        true
+    }
+}
+
+/// Changes to how a player's weapons work, from a mode's upgrades. Without
+/// one, every weapon works as its `WeaponDef` says. Read by the weapon code
+/// on both sides: the player's game for the magazine, reload, fire mode and
+/// speed, the server for damage.
+#[derive(Component, Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct WeaponMods {
+    /// Damage, per weapon.
+    pub damage: [f32; WeaponKind::COUNT],
+    /// Magazine size, per weapon.
+    pub mag: [f32; WeaponKind::COUNT],
+    /// Extra targets a shot passes through, per weapon.
+    pub pierce: [u8; WeaponKind::COUNT],
+    /// Pellets per shot instead of the weapon's own (0 keeps it), per weapon.
+    pub pellets: [u8; WeaponKind::COUNT],
+    /// Weapons that fire while the trigger is held, one bit each.
+    pub automatic: u16,
+    /// Weapons that lose no accuracy from moving, one bit each.
+    pub steady: u16,
+    /// Weapons whose spray settles after a few shots, one bit each.
+    pub settle: u16,
+    /// Reload time, per weapon, and the time to draw a weapon.
+    pub reload: [f32; WeaponKind::COUNT],
+    pub swap: f32,
+    /// Running speed.
+    pub speed: f32,
+    /// Headshot damage.
+    pub head: f32,
+}
+
+impl Default for WeaponMods {
+    fn default() -> Self {
+        Self {
+            damage: [1.0; WeaponKind::COUNT],
+            mag: [1.0; WeaponKind::COUNT],
+            pierce: [0; WeaponKind::COUNT],
+            pellets: [0; WeaponKind::COUNT],
+            automatic: 0,
+            steady: 0,
+            settle: 0,
+            reload: [1.0; WeaponKind::COUNT],
+            swap: 1.0,
+            speed: 1.0,
+            head: 1.0,
+        }
+    }
+}
+
+impl WeaponMods {
+    pub fn has(mask: u16, weapon: WeaponKind) -> bool {
+        mask & (1 << weapon.index()) != 0
+    }
+
+    /// The magazine size for `weapon` with these changes.
+    pub fn mag_of(mods: Option<&Self>, weapon: WeaponKind) -> u32 {
+        let base = weapon.def().mag;
+        match mods {
+            Some(m) => ((base as f32 * m.mag[weapon.index()]).round() as u32).max(1),
+            None => base,
+        }
+    }
+
+    /// Pellets per shot for `weapon` with these changes.
+    pub fn pellets_of(mods: Option<&Self>, weapon: WeaponKind) -> u32 {
+        match mods.map(|m| m.pellets[weapon.index()]) {
+            Some(n) if n > 0 => n as u32,
+            _ => weapon.def().pellets,
+        }
+    }
+}
+
+/// Something hostile that isn't a player: hittable (with `Pose`, `Health`
+/// and a hitbox), drawn with the avatar skeleton, but not on the scoreboard.
+/// A game mode spawns them and gives each `kind` a look (`avatar/mob.rs`).
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
+#[require(Transform, Visibility)]
+pub struct Mob {
+    pub kind: u8,
+    /// What the mode wants shown on it (burning, frozen, ...); the mode's
+    /// client code reads it.
+    pub flags: u8,
+}
+
+/// A mob that was killed. It stays a moment so its ragdoll can be made from
+/// it, then the server removes it.
+#[derive(Component, Serialize, Deserialize, Clone, Copy, Debug)]
+pub struct Dead;

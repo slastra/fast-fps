@@ -10,19 +10,18 @@ use bevy::{platform::collections::HashMap, prelude::*};
 use bevy_replicon::prelude::*;
 
 use crate::{
-    net::{Duel, Exploded, Health, Player, Pose, Projectile, Throw},
+    net::{Exploded, Health, Kit, Out, Player, Pose, Projectile, Throw},
     physics::Layer,
     server::{
-        combat::{Died, Hits},
+        combat::{Blast, Hits, blast},
         players::{PlayerClient, find_player},
+        rules::{Died, Disarmed},
     },
     weapon::{GRENADE, WeaponKind},
 };
 
 /// The grenade's collision radius.
 pub const RADIUS: f32 = 0.06;
-/// Height above a target's collider center that the blast aims at.
-const CHEST: f32 = 0.2;
 
 /// Server-only: the live grenade's thrower and the seconds until it goes off.
 #[derive(Component)]
@@ -45,18 +44,14 @@ pub fn receive_throws(
     mut thrown: ResMut<Thrown>,
     clients: Query<(Entity, &PlayerClient)>,
     players: Query<(&Player, &Pose)>,
+    mut kits: Query<(Option<&mut Kit>, Has<Out>, Has<Disarmed>)>,
     spatial: SpatialQuery,
-    duels: Query<(), With<Duel>>,
     mut commands: Commands,
 ) {
-    for Died(entity) in deaths.read() {
-        thrown.0.remove(entity);
+    for died in deaths.read() {
+        thrown.0.remove(&died.victim);
     }
     for FromClient { client_id, message } in throws.read() {
-        // A duel is pistols only.
-        if !duels.is_empty() {
-            continue;
-        }
         let Some(thrower) = find_player(*client_id, &clients) else {
             continue;
         };
@@ -66,11 +61,28 @@ pub fn receive_throws(
         if !message.origin.is_finite() {
             continue;
         }
-        let count = thrown.0.entry(thrower).or_default();
-        if *count >= WeaponKind::Grenade.def().mag {
+        let Ok((kit, out, disarmed)) = kits.get_mut(thrower) else {
+            continue;
+        };
+        if out || disarmed {
             continue;
         }
-        *count += 1;
+        match kit {
+            // A mode that counts grenades: one of them, if they own any.
+            Some(mut kit) => {
+                if !kit.owns(WeaponKind::Grenade) || !kit.spend(WeaponKind::Grenade) {
+                    continue;
+                }
+            }
+            // Otherwise one per life.
+            None => {
+                let count = thrown.0.entry(thrower).or_default();
+                if *count >= WeaponKind::Grenade.def().mag {
+                    continue;
+                }
+                *count += 1;
+            }
+        }
 
         // Start a little in front of the eye, but never inside a wall.
         let ahead = 0.5;
@@ -139,39 +151,19 @@ pub fn tick_grenades(
             message: Exploded { pos },
         });
 
-        let blast = pos + Vec3::Y * 0.1;
-        let walls = SpatialQueryFilter::from_mask(Layer::World);
-        let mut any_hit = false;
-        let mut any_kill = false;
-        for (target, pose) in &victims {
-            let chest = pose.pos + Vec3::Y * CHEST;
-            let offset = chest - blast;
-            let distance = offset.length();
-            let damage = GRENADE.damage_at(distance);
-            if damage <= 0.0 {
-                continue;
-            }
-            // Walls shield you. The ray stops a little short of the target so
-            // the floor it stands on doesn't count.
-            if let Ok(dir) = Dir3::new(offset)
-                && spatial
-                    .cast_ray(blast, dir, (distance - 0.3).max(0.0), true, &walls)
-                    .is_some()
-            {
-                continue;
-            }
-            let Some(hurt) = hits.hurt(fuse.thrower, target, damage, false, WeaponKind::Grenade)
-            else {
-                continue;
-            };
-            any_hit |= target != fuse.thrower;
-            any_kill |= hurt.killed && target != fuse.thrower;
-            // Bodies fly up and away from the blast.
-            let push = offset.normalize_or_zero() + Vec3::Y * 0.6;
-            hits.wounded(target, &hurt, push, chest, WeaponKind::Grenade);
-        }
-        if any_hit {
-            hits.confirm(fuse.thrower, false, any_kill);
-        }
+        let near: Vec<(Entity, Vec3)> = victims.iter().map(|(e, p)| (e, p.pos)).collect();
+        blast(
+            &spatial,
+            &mut hits,
+            &near,
+            Blast {
+                at: pos + Vec3::Y * 0.1,
+                attacker: fuse.thrower,
+                damage: GRENADE.damage,
+                radius: GRENADE.radius,
+                weapon: WeaponKind::Grenade,
+                tag: 0,
+            },
+        );
     }
 }

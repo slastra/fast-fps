@@ -196,21 +196,43 @@ Then scripts can `assert coins == 3` and `wait_until coins >= 1 5`. Built-in val
 
 ## Add a game mode
 
-Duel (`src/server/duel.rs` and `src/duel.rs`) is the worked example. A mode is three pieces:
+Duel (`src/server/duel.rs`, `src/duel.rs`) is the small worked example; survival
+(`src/server/survival/`, `src/survival/`, [survival.md](survival.md)) is the big one. Keep a
+mode in its own modules: the rest of the game should never ask which mode is on. Where the
+core can't do what a mode needs, add a general hook to the core instead, as below.
 
-1. **State everyone can see.** One replicated component on its own entity (`Duel` in
-   `src/net/protocol.rs`, added to `register`), spawned by a console command and despawned to
-   end the mode. Its existence is the mode: other code asks "is there a `Duel`?".
-2. **Rules on the server.** A system in `src/server/` that runs only while the entity exists.
-   Keep the round logic a plain function of the state (`duel::step`) so it can be unit
-   tested without the game. Change who may attack in `Hits::allows` and what a kill does in
-   `Hits::hurt` (`src/server/combat.rs`), so every weapon follows the mode's rules.
-3. **What players see.** A client plugin that reads the replicated state: banners, marks,
-   sounds, and the limits the weapon code checks (`Arsenal::locked`, `flintlock_only`).
+1. **Register it.** `app.game_mode("name")` makes `mode name` switch to it. The `mode`
+   command resets everyone (scores, health, `Kit`, `WeaponMods`, `Out`...) and the `Rules` to
+   their defaults, then sends `ModeChange { to }`. Run the mode's systems
+   `.after(ModeSwitch)`.
+2. **State everyone can see.** One replicated component on its own entity (`Duel`,
+   `Survival`), spawned when `ModeChange` names the mode and despawned when it names another.
+   Its existence is the mode: run the mode's systems with
+   `run_if(any_with_component::<Survival>)`. Put its wire types in their own `register`
+   called at the end of `net::protocol::register`, as `survival::protocol` is.
+3. **Rules on the server**, in `src/server/<mode>/`. Keep the round logic a plain function of
+   the state (`duel::step`, `survival::waves::step`) so it can be unit tested without the
+   game. The hooks:
+   - `Rules`: respawns, friendly fire, the practice dummies, player ragdolls.
+   - `Died { victim, killer }`: what a kill means (the duel puts the loser `Out`; survival
+     puts them on their knees). `Unstuck` is the `kill` command when respawns are off.
+   - `Out` (not drawn, can't be hurt or fire), `Disarmed` (can't fire), `Untouchable`.
+   - `Kit` (which weapons a player owns, finite ammo) and `WeaponMods` (damage, magazine,
+     reload, pierce, pellets, full auto, move speed...), both replicated so the player's own
+     game follows them.
+   - `Mob`, plus `Health`, `Pose` and `hitbox()`: an enemy that isn't a player. Weapons hurt it
+     like anything else; when killed it gets `Dead` and is cleared away. Its look comes from
+     `app.mob_look(kind, ...)` on the client.
+   - `HitLanded` and `Boom`: react to every hit and blast without touching the weapons.
+     `blast()` is the grenade's area damage, for a mode's own explosions.
+4. **What players see**, in `src/<mode>/` or `src/<mode>.rs`, reading the replicated state:
+   banners, marks, sounds. Limits on the local player are set fresh every frame in
+   `PreUpdate`: `MoveLimits` (speed, jumping, kneeling view, pose flags others see),
+   `Arsenal::locked` (the trigger), `MenuKeys` (1-3 for a menu, not weapons).
 
-Put a player out of play with the replicated `Out` marker: they aren't drawn, can't be hurt
-and can't fire. Publish the mode's state to the probe (`duel`, `duel_round`, ...) so a
-scenario can follow it, as `tests/harness/duel.cfg` does.
+Publish the mode's state to the probe (`duel`, `survival`, `wave`...) so a scenario can follow
+it, as `tests/harness/duel.cfg` and `survival.cfg` do. Add the name to `MODES` in
+`lobby/src/main.rs` and to `create` in `src/net/lobby.rs` to offer it online.
 
 ## Add a bot order
 

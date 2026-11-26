@@ -17,7 +17,7 @@ Launch arguments are console commands with a `+`: `cargo run -- +name alice +hos
 | `status` | Show connection and scores. |
 | `lobby [url]` | Show or set the online lobby (default `https://fps.lastra.us`). Saved. |
 | `games` | List the games in the lobby. |
-| `create [ffa\|duel] [name]` | Start a game in the lobby and join it. You run it: the host-only commands work for you. |
+| `create [ffa\|duel\|survival] [name]` | Start a game in the lobby and join it. You run it: the host-only commands work for you. |
 | `join <id\|name>` | Join a game in the lobby, by its number or (the start of) its name. |
 | `name <name>` | Set your player name. Saved. |
 | `sens <value>` | Mouse sensitivity (default 0.07). Saved. |
@@ -29,7 +29,9 @@ Launch arguments are console commands with a `+`: `cargo run -- +name alice +hos
 | `zoom <level>` | Sniper scope level; 0 is unscoped (also right click). |
 | `kill` | Respawn somewhere else. In a duel, back to your start or watching spot. |
 | `draw` | In a duel, after "Draw!": draw your pistol (also Space). Fired before it's fully up, a shot goes low. |
-| `mode [ffa\|duel]` | The game mode (host or offline, or whoever runs an online game): free-for-all, or a flintlock duel. With no argument, prints the current one. |
+| `mode [ffa\|duel\|survival]` | The game mode (host or offline, or whoever runs an online game): free-for-all, a flintlock duel, or co-op survival against zombies. The current mode again starts it over. With no argument, prints the current one. |
+| `pick <1\|2\|3>` | In survival, take one of the cards on offer (also keys 1-3). |
+| `revive <on\|off>` | In survival, hold (or let go of) the revive key, E. |
 | `quit` | Exit. |
 
 Saved settings live in `~/.config/<game name>/config.cfg`, which is itself a list of console
@@ -42,6 +44,17 @@ commands run at startup.
 | `bot [x y z yaw]` | Spawn a practice bot (host or offline, or whoever runs an online game). With no arguments: 5 m in front of you, or at a spawn point online. |
 | `bot_do <id\|all> <order> [arg]` | `idle walk run strafe back crouch stand jump reload fire weapon look pin free remove` |
 | `bot_duel_aim <0..1>` | How often a dueling bot hits: 0 never, 1 always (default 0.5). In a duel, bots walk to their marks and fire back on their own. |
+
+## Survival (hosting or offline)
+
+| Command | |
+|---|---|
+| `give_card <name>` | Take a card now, if it could be offered (`give_card Twin Belt`). |
+| `zombie [walker\|runner\|brute] [x z]` | A zombie now, 6 m in front of you or at x z, going for the nearest player. |
+| `next_wave` | End the breather now. |
+| `end_wave` | Clear the wave's zombies now. |
+
+[survival.md](survival.md) lists the cards and the probe values survival publishes.
 
 ## Scripts and tests
 

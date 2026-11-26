@@ -7,7 +7,7 @@ use rand::{SeedableRng, rngs::StdRng};
 use crate::{
     config::DUEL_LOW_DEG,
     console::{ConsoleCommand, Print},
-    net::SelectWeapon,
+    net::{Kit, LocalId, Out, Player, SelectWeapon, WeaponMods},
     player::GameInput,
     sound::{Sounds, play},
     weapon::defs::{WeaponDef, WeaponKind},
@@ -109,12 +109,21 @@ pub struct Arsenal {
     /// A flintlock shot on its way: seconds until the spark lights the
     /// powder and it fires.
     pub priming: Option<f32>,
-    /// Set by the duel (`duel.rs`): the trigger does nothing (before
-    /// "Draw!", or while out), only the flintlock may be drawn, and you are
-    /// out of the round (so your gun isn't shown).
+    /// The trigger does nothing this frame. Cleared at the start of every
+    /// frame; a game mode sets it in `PreUpdate` while it wants it (a duel
+    /// before "Draw!", a downed player in survival).
     pub locked: bool,
-    pub flintlock_only: bool,
+    /// This player is out of play (`Out`), so their gun isn't shown.
     pub out: bool,
+    /// What a game mode lets this player use (`Kit`) and how it changed
+    /// their weapons (`WeaponMods`), copied from their player by
+    /// [`local_kit`]. Without a mode: everything, unlimited, unchanged.
+    pub owned: u16,
+    pub kit: Option<Kit>,
+    pub mods: WeaponMods,
+    /// Rounds this machine has fired, per weapon (wrapping), to compare with
+    /// `Kit::spent`.
+    pub fired: [u16; WeaponKind::COUNT],
     /// How far the gun is out of the holster, 0 to 1. Always 1 outside a
     /// duel; a duelist starts each round at 0 and draws with Space after
     /// "Draw!" (`duel.rs`).
@@ -148,8 +157,11 @@ impl Default for Arsenal {
             charge: None,
             priming: None,
             locked: false,
-            flintlock_only: false,
             out: false,
+            owned: ALL_WEAPONS,
+            kit: None,
+            mods: WeaponMods::default(),
+            fired: [0; WeaponKind::COUNT],
             raised: 1.0,
             drawing: false,
             rng: StdRng::seed_from_u64(1),
@@ -157,9 +169,68 @@ impl Default for Arsenal {
     }
 }
 
+/// Every weapon, as an owned mask.
+const ALL_WEAPONS: u16 = (1 << WeaponKind::COUNT) - 1;
+
+/// Shots this machine fired that the server hasn't counted yet, at most
+/// this many; more means the counts belong to different kits.
+const IN_FLIGHT_MAX: u16 = 200;
+
 impl Arsenal {
     pub fn def(&self) -> &'static WeaponDef {
         self.current.def()
+    }
+
+    pub fn owns(&self, kind: WeaponKind) -> bool {
+        self.owned & (1 << kind.index()) != 0
+    }
+
+    /// Magazine size, with upgrades.
+    pub fn mag(&self, kind: WeaponKind) -> u32 {
+        WeaponMods::mag_of(Some(&self.mods), kind)
+    }
+
+    pub fn reload_secs(&self, kind: WeaponKind) -> f32 {
+        kind.def().reload_secs * self.mods.reload[kind.index()]
+    }
+
+    pub fn draw_secs(&self, kind: WeaponKind) -> f32 {
+        kind.def().draw_secs * self.mods.swap
+    }
+
+    pub fn pellets(&self, kind: WeaponKind) -> u32 {
+        WeaponMods::pellets_of(Some(&self.mods), kind)
+    }
+
+    pub fn automatic(&self, kind: WeaponKind) -> bool {
+        kind.def().automatic || WeaponMods::has(self.mods.automatic, kind)
+    }
+
+    /// Rounds left for `kind`, magazine and spare together, counting shots
+    /// the server hasn't seen yet. `None` is unlimited.
+    pub fn rounds_left(&self, kind: WeaponKind) -> Option<u32> {
+        let kit = self.kit.as_ref()?;
+        let left = kit.left(kind)?;
+        let in_flight = self.fired[kind.index()].wrapping_sub(kit.spent[kind.index()]);
+        let in_flight = if in_flight > IN_FLIGHT_MAX {
+            0
+        } else {
+            in_flight
+        };
+        Some(left.saturating_sub(in_flight) as u32)
+    }
+
+    /// Spare rounds for `kind`, beyond what's in the magazine. `None` is
+    /// unlimited.
+    pub fn spare(&self, kind: WeaponKind) -> Option<u32> {
+        self.rounds_left(kind)
+            .map(|left| left.saturating_sub(self.ammo[kind.index()]))
+    }
+
+    /// A round of `kind` left this machine.
+    pub fn count_shot(&mut self, kind: WeaponKind) {
+        let i = kind.index();
+        self.fired[i] = self.fired[i].wrapping_add(1);
     }
 
     pub fn scoped(&self) -> bool {
@@ -173,7 +244,7 @@ impl Arsenal {
         }
         self.last = self.current;
         self.current = kind;
-        self.draw = kind.def().draw_secs;
+        self.draw = self.draw_secs(kind);
         self.reloading = 0.0;
         self.zoom = 0;
         self.spray = 0.0;
@@ -234,8 +305,8 @@ pub fn weapon_commands(
             continue;
         }
         match cmd.arg(0).and_then(WeaponKind::parse) {
-            Some(kind) if arsenal.flintlock_only && kind != WeaponKind::Flintlock => {
-                print.write(Print("a duel is flintlock only".into()));
+            Some(kind) if !arsenal.owns(kind) => {
+                print.write(Print(format!("you don't have the {}", kind.def().name)));
             }
             Some(kind) => {
                 if arsenal.select(kind) {
@@ -251,9 +322,15 @@ pub fn weapon_commands(
     }
 }
 
+/// Set by a game mode while it uses the number keys for something else (a
+/// menu); they don't switch weapons then.
+#[derive(Resource, Default)]
+pub struct MenuKeys(pub bool);
+
 pub fn switch_weapon(
     input: Res<GameInput>,
     keys: Res<ButtonInput<KeyCode>>,
+    menu: Res<MenuKeys>,
     mut wheel: MessageReader<MouseWheel>,
     mut arsenal: ResMut<Arsenal>,
     mut select: MessageWriter<SelectWeapon>,
@@ -261,23 +338,33 @@ pub fn switch_weapon(
     sounds: Res<Sounds>,
 ) {
     let scroll: f32 = wheel.read().map(|w| w.y).sum();
-    if !input.enabled || arsenal.flintlock_only {
+    if !input.enabled {
         return;
     }
     // Number keys pick weapons in the order they are listed in `WeaponKind::ALL`.
     let mut wanted = WeaponKind::ALL
         .into_iter()
         .zip(SLOT_KEYS)
+        .filter(|_| !menu.0)
         .find(|(_, key)| keys.just_pressed(*key))
         .map(|(kind, _)| kind);
     if keys.just_pressed(KeyCode::KeyQ) {
         wanted = Some(arsenal.last);
     }
     if scroll != 0.0 {
-        let i = arsenal.current.index() as i32 + if scroll < 0.0 { 1 } else { -1 };
-        wanted = Some(WeaponKind::ALL[i.rem_euclid(WeaponKind::COUNT as i32) as usize]);
+        // The next weapon you own that way.
+        let step = if scroll < 0.0 { 1 } else { -1 };
+        let mut i = arsenal.current.index() as i32;
+        for _ in 0..WeaponKind::COUNT {
+            i = (i + step).rem_euclid(WeaponKind::COUNT as i32);
+            if arsenal.owns(WeaponKind::ALL[i as usize]) {
+                break;
+            }
+        }
+        wanted = Some(WeaponKind::ALL[i as usize]);
     }
     if let Some(kind) = wanted
+        && arsenal.owns(kind)
         && arsenal.select(kind)
     {
         select.write(SelectWeapon(kind));
@@ -308,4 +395,60 @@ pub fn zoom_input(
         levels[arsenal.zoom - 1]
     };
     zoom.set_if_neq(Zoom(target));
+}
+
+/// Copy what the game mode gave this player (their `Kit` and `WeaponMods`,
+/// and whether they're `Out`) into the arsenal, and put away a weapon they
+/// no longer own.
+pub fn local_kit(
+    local: Res<LocalId>,
+    players: Query<(&Player, Option<&Kit>, Option<&WeaponMods>, Has<Out>)>,
+    mut arsenal: ResMut<Arsenal>,
+    mut select: MessageWriter<SelectWeapon>,
+) {
+    let mine = players.iter().find(|p| p.0.owner == local.0);
+    let (kit, mods, out) = match mine {
+        Some((_, kit, mods, out)) => (kit.cloned(), mods.cloned().unwrap_or_default(), out),
+        None => (None, WeaponMods::default(), false),
+    };
+    if arsenal.kit != kit {
+        // A new kit's counts don't match ours; start from the server's.
+        if let Some(kit) = &kit {
+            for i in 0..WeaponKind::COUNT {
+                if arsenal.fired[i].wrapping_sub(kit.spent[i]) > IN_FLIGHT_MAX {
+                    arsenal.fired[i] = kit.spent[i];
+                }
+            }
+        }
+        arsenal.owned = kit.as_ref().map_or(ALL_WEAPONS, |k| k.owned);
+        arsenal.kit = kit;
+    }
+    if arsenal.mods != mods {
+        arsenal.mods = mods;
+    }
+    if arsenal.out != out {
+        arsenal.out = out;
+    }
+    // No more rounds in the magazine than it holds (a card that made it
+    // bigger may be gone), or than there are left at all.
+    for kind in WeaponKind::ALL {
+        let i = kind.index();
+        let holds = if kind.def().class == crate::weapon::Class::Gun {
+            WeaponMods::mag_of(Some(&arsenal.mods), kind)
+        } else {
+            u32::MAX
+        };
+        let most = arsenal
+            .rounds_left(kind)
+            .map_or(holds, |left| left.min(holds));
+        if arsenal.ammo[i] > most {
+            arsenal.ammo[i] = most;
+        }
+    }
+    if !arsenal.owns(arsenal.current)
+        && let Some(kind) = WeaponKind::ALL.into_iter().find(|k| arsenal.owns(*k))
+        && arsenal.select(kind)
+    {
+        select.write(SelectWeapon(kind));
+    }
 }

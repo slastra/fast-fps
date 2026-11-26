@@ -30,6 +30,14 @@ src/
   render.rs      The camera and its post-processing: bloom, shadows, anti-aliasing.
   sky.rs         The four times of day: sky dome, sun or moon, light, fog, exposure.
   duel.rs        The duel as you see it: marks, banners, the bell, the quick draw.
+
+  survival/      Co-op survival (`mode survival`), shared and as you see it.
+    cards.rs       The card table, and what a hand of cards adds up to.
+    cracks.rs      The cracks in the walls, routes to the keep, its doors.
+    protocol.rs    Survival's wire types.
+    hud.rs         The wave line, the cards, being down, the revive prompt.
+    scene.rs       Cracks, pickups, burning and frozen zombies, arcs and bursts.
+    mod.rs         Card keys, revive key, movement limits while down, probe values.
   lowpoly.rs     The shape kit: beveled blocks, crates, barrels, rocks, pines, grass.
 
   console/       The drop-down console. The whole user interface.
@@ -53,7 +61,9 @@ src/
     grenades.rs    Thrown grenades: their flight, fuse and blast.
     dummies.rs     Practice targets.
     bots.rs        Practice bots and the `bot` commands. Dueling bots fire back.
+    rules.rs       Game modes: `mode`, the `Rules`, `Died`, and the other hooks a mode uses.
     duel.rs        The duel game mode (`mode duel`): rounds, marks, who's in and out.
+    survival/      Survival's rules: waves, zombies, going down, drops, the draft, ammo effects.
     admin.rs       Who runs a dedicated server's game, and their commands from afar.
 
   player/        The character you control.
@@ -78,6 +88,7 @@ src/
     ik.rs          Two-bone inverse kinematics.
     anim.rs        Turns "moving at this speed, crouched, aiming up" into a pose.
     ragdoll.rs     Physics corpses.
+    mob.rs         Bodies for a mode's enemies (`Mob`), one shared set of meshes per kind.
 
   world/         The map.
     arena.rs       The layout. Edit this to change the map.

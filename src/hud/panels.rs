@@ -58,9 +58,11 @@ pub fn weapon(
     mut bar: Single<(&mut Node, &mut BackgroundColor), With<AmmoFill>>,
 ) {
     let def = arsenal.def();
-    let rounds = arsenal.ammo[arsenal.current.index()];
+    let kind = arsenal.current;
+    let rounds = arsenal.ammo[kind.index()];
+    let mag_size = arsenal.mag(kind);
     let reloading = arsenal.reloading > 0.0;
-    let low = rounds as f32 <= def.mag as f32 * 0.25;
+    let low = rounds as f32 <= mag_size as f32 * 0.25;
     // The knife has no ammo at all: show nothing rather than "0 / 0".
     let counted = def.mag > 0;
 
@@ -81,10 +83,11 @@ pub fn weapon(
     } else {
         TEXT
     };
-    let of = if counted {
-        format!("/ {}", def.mag)
-    } else {
-        String::new()
+    // In a mode that counts ammo, the spare rounds; otherwise the magazine.
+    let of = match (counted, arsenal.spare(kind)) {
+        (false, _) => String::new(),
+        (true, Some(spare)) => format!("/ {spare}"),
+        (true, None) => format!("/ {mag_size}"),
     };
     if mag.0 != of {
         mag.0 = of;
@@ -103,9 +106,9 @@ pub fn weapon(
     }
     // The bar is the magazine; while reloading it fills back up.
     let fraction = if reloading {
-        1.0 - arsenal.reloading / def.reload_secs
+        1.0 - arsenal.reloading / arsenal.reload_secs(kind)
     } else if counted {
-        rounds as f32 / def.mag as f32
+        rounds as f32 / mag_size as f32
     } else {
         0.0
     };
@@ -132,7 +135,15 @@ pub fn slots(
     }
     *shown = (*shown - time.delta_secs()).max(0.0);
     let strip = (*shown / 0.5).clamp(0.0, 1.0);
-    let alpha = |kind: WeaponKind| strip * if kind == arsenal.current { 1.0 } else { 0.38 };
+    // Weapons you don't own (in a mode with a `Kit`) aren't shown.
+    let alpha = |kind: WeaponKind| {
+        let shade = if kind == arsenal.current { 1.0 } else { 0.38 };
+        if arsenal.owns(kind) {
+            strip * shade
+        } else {
+            0.0
+        }
+    };
     for (slot, mut icon) in &mut icons {
         icon.color = TEXT.with_alpha(alpha(slot.0));
     }

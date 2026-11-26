@@ -91,11 +91,53 @@ pub const DUEL_RAISE_SECS: f32 = 0.5;
 /// degrees. It shrinks to nothing as the pistol comes up.
 pub const DUEL_LOW_DEG: f32 = 25.0;
 
+// --- Survival (`mode survival`, see server/survival/) ----------------------
+
+/// Zombies in the first wave; each wave after brings 2 more.
+pub const SURVIVAL_WAVE_START: u16 = 3;
+/// Seconds between waves (the draft), and before the very first wave.
+pub const SURVIVAL_BREATHER_SECS: f32 = 15.0;
+pub const SURVIVAL_FIRST_BREATHER_SECS: f32 = 5.0;
+/// Seconds the end of a run stays on screen before the next one starts.
+pub const SURVIVAL_OVER_SECS: f32 = 10.0;
+/// At most this many zombies at once; the rest wait at the cracks.
+pub const SURVIVAL_MAX_ALIVE: usize = 24;
+/// Seconds between zombies coming through the cracks.
+pub const SURVIVAL_SPAWN_SECS: f32 = 1.1;
+/// A downed player bleeds out after this long, unless revived.
+pub const SURVIVAL_BLEED_SECS: f32 = 30.0;
+/// Holding the revive key (E) this long, this close, brings them back.
+pub const SURVIVAL_REVIVE_SECS: f32 = 3.0;
+pub const SURVIVAL_REVIVE_RANGE: f32 = 1.8;
+/// Health after a revive (the Rally perk gives more).
+pub const SURVIVAL_REVIVE_HEALTH: f32 = 40.0;
+/// Spare magazines a new gun comes with, and a run starts with for the Glock.
+pub const SURVIVAL_START_MAGS: u16 = 3;
+/// How often a killed zombie drops an ammo box, or a medkit (the Scavenger
+/// perk raises both).
+pub const SURVIVAL_AMMO_DROP: f32 = 0.22;
+pub const SURVIVAL_MED_DROP: f32 = 0.0;
+/// Walk within this of a pickup to take it; it lasts this long.
+pub const SURVIVAL_PICKUP_RANGE: f32 = 1.3;
+pub const SURVIVAL_PICKUP_SECS: f32 = 30.0;
+/// Health a medkit gives back.
+pub const SURVIVAL_MEDKIT: f32 = 35.0;
+/// Where players start, and come back after bleeding out: inside the keep.
+pub const SURVIVAL_KEEP: [Vec3; 4] = [
+    Vec3::new(-2.0, 1.2, 2.5),
+    Vec3::new(-2.0, 1.2, -2.5),
+    Vec3::new(2.0, 1.2, 2.5),
+    Vec3::new(2.0, 1.2, -2.5),
+];
+
 // --- Corpses ---------------------------------------------------------------
 
 pub const MAX_RAGDOLLS: usize = 6;
 /// Seconds before a corpse fades away.
 pub const RAGDOLL_SECS: f32 = 12.0;
+/// A killed mob (a game mode's enemy) stays this long before the server
+/// removes it, so every client has made its ragdoll by then.
+pub const MOB_CORPSE_SECS: f32 = 1.5;
 
 /// FNV-1a, usable in a `const`.
 const fn fnv1a(text: &str) -> u64 {

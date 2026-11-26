@@ -35,7 +35,7 @@ mod models;
 mod throw;
 mod view_model;
 
-pub use arsenal::{Arsenal, HideViewModel, HitMarker, ScriptedFire, Zoom};
+pub use arsenal::{Arsenal, HideViewModel, HitMarker, MenuKeys, ScriptedFire, Zoom};
 pub use blast::Explosions;
 pub use defs::{Class, GRENADE, KNIFE, WeaponKind};
 pub use icons::{ICON_ASPECT, WeaponIcons};
@@ -46,7 +46,7 @@ use bevy::prelude::*;
 use crate::{
     console::ConsoleAppExt,
     weapon::{
-        arsenal::{switch_weapon, weapon_commands, zoom_input},
+        arsenal::{local_kit, switch_weapon, weapon_commands, zoom_input},
         firing::{fire, hit_confirms, recover, reload, update_accuracy},
         knife::knife,
         throw::grenade,
@@ -69,6 +69,13 @@ pub(super) fn plugin(app: &mut App) {
         .init_resource::<ScriptedFire>()
         .init_resource::<HideViewModel>()
         .init_resource::<Zoom>()
+        .init_resource::<MenuKeys>()
+        .add_systems(First, |mut arsenal: ResMut<Arsenal>| arsenal.locked = false)
+        // What the game mode gave the local player, before anything uses it.
+        .add_systems(
+            PreUpdate,
+            local_kit.after(bevy_replicon::prelude::ClientSystems::Receive),
+        )
         .add_systems(PostStartup, build_view_models)
         .add_systems(
             Update,

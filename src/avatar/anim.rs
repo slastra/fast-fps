@@ -29,6 +29,8 @@ use crate::{
 const RUN_SPEED: f32 = 10.0;
 /// How far the hips drop in a full crouch.
 const CROUCH_DROP: f32 = 0.36;
+/// How far the hips drop kneeling (downed).
+const KNEEL_DROP: f32 = 0.5;
 
 #[derive(Component)]
 pub struct AvatarAnim {
@@ -41,6 +43,11 @@ pub struct AvatarAnim {
     pub reload: f32,
     /// 1 while a duelist's pistol is holstered, easing to 0 as it's drawn.
     pub holster: f32,
+    /// 1 down on one knee.
+    pub down: f32,
+    /// 1 with both arms reaching forward (a mob), and 1 mid-swing.
+    pub reach: f32,
+    pub swing: f32,
     /// Aim pitch in radians, positive up.
     pub pitch: f32,
     /// 1 right after a shot, decaying to 0.
@@ -68,6 +75,9 @@ impl Default for AvatarAnim {
             air: 0.0,
             reload: 0.0,
             holster: 0.0,
+            down: 0.0,
+            reach: 0.0,
+            swing: 0.0,
             pitch: 0.0,
             recoil: 0.0,
             flinch: Vec2::ZERO,
@@ -117,6 +127,9 @@ pub fn advance(
         a.reload.smooth_nudge(&flag(Pose::RELOAD), 9.0, dt);
         // About as quick as the draw itself (`DUEL_RAISE_SECS`).
         a.holster.smooth_nudge(&flag(Pose::HOLSTER), 8.0, dt);
+        a.down.smooth_nudge(&flag(Pose::DOWN), 6.0, dt);
+        a.reach.smooth_nudge(&flag(Pose::REACH), 10.0, dt);
+        a.swing.smooth_nudge(&flag(Pose::SWING), 14.0, dt);
 
         let speed = Vec2::new(a.vel.x, a.vel.z).length();
         a.phase = (a.phase + stride_freq(speed) * smoothstep(0.1, 0.6, speed) * dt).fract();
@@ -242,7 +255,8 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
     let hips_pos = Vec3::new(
         0.0,
         Bone::Hips.offset().y - CROUCH_DROP * a.crouch - 0.04 * gait * ground + bob - 0.14 * a.land
-            + 0.004 * breathe,
+            + 0.004 * breathe
+            - KNEEL_DROP * a.down,
         0.05 * a.crouch,
     );
     // Swing the hip of the leading leg forward.
@@ -288,9 +302,10 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
     // --- Torso and head --------------------------------------------------
     // Lean into the crouch, follow part of the aim pitch, and cancel the hip
     // twist so the shoulders stay square to the target.
-    let torso_local = Quat::from_rotation_x(-0.3 * a.crouch + 0.3 * a.pitch + a.flinch.x)
-        * Quat::from_rotation_z(a.flinch.y)
-        * Quat::from_rotation_y(-hold.blade - twist);
+    let torso_local =
+        Quat::from_rotation_x(-0.3 * a.crouch - 0.45 * a.down + 0.3 * a.pitch + a.flinch.x)
+            * Quat::from_rotation_z(a.flinch.y)
+            * Quat::from_rotation_y(-hold.blade - twist);
     let torso_rot = hips_rot * torso_local;
     let torso_pos = hips_pos + hips_rot * Bone::Torso.offset();
     bones[Bone::Torso.index()].rotation = torso_local;
@@ -334,6 +349,22 @@ pub fn compute(a: &AvatarAnim) -> RigPose {
     // While reloading the support hand works the magazine.
     let magazine = gun_pos + gun_rot * Vec3::new(0.0, -0.2 + 0.04 * (a.time * 9.0).sin(), -0.14);
     let left_hand = support.lerp(magazine, reload);
+    // A mob reaches forward with both hands, and raises them to swing.
+    let reach = smoothstep(0.0, 1.0, a.reach);
+    let (left_hand, right_hand) = if reach > 0.0 {
+        let out = |side: f32, arm: Bone| {
+            torso_pos
+                + torso_rot
+                    * (arm.offset()
+                        + Vec3::new(side * 0.04, -0.06 + 0.32 * a.swing, -0.56 + 0.12 * a.swing))
+        };
+        (
+            left_hand.lerp(out(-1.0, Bone::UpperArmL), reach),
+            right_hand.lerp(out(1.0, Bone::UpperArmR), reach),
+        )
+    } else {
+        (left_hand, right_hand)
+    };
 
     for (side, upper, fore, hand) in [
         (-1.0, Bone::UpperArmL, Bone::ForearmL, left_hand),
@@ -443,6 +474,23 @@ mod tests {
                 }
             }
         }
+        // A mob reaching and swinging, and someone kneeling (downed).
+        let extra: Vec<AvatarAnim> = out
+            .iter()
+            .step_by(7)
+            .map(|a| AvatarAnim {
+                reach: 1.0,
+                swing: if a.phase > 0.3 { 1.0 } else { 0.0 },
+                down: if a.crouch > 0.5 { 1.0 } else { 0.0 },
+                weapon: a.weapon,
+                vel: a.vel,
+                pitch: a.pitch,
+                phase: a.phase,
+                time: a.time,
+                ..default()
+            })
+            .collect();
+        out.extend(extra);
         out
     }
 
